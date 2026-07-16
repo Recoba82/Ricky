@@ -10,6 +10,7 @@ import {
   applySampler,
   getMeshNormalTexture,
 } from '../utils/patterns';
+import { createNameNumberTexture } from '../utils/nameNumber';
 
 export const MODEL_URL = `${import.meta.env.BASE_URL}models/psg-jordan-kit.glb`;
 
@@ -129,6 +130,13 @@ function decalAnchor(position, kitBox) {
         ax: new THREE.Vector3(0, 0, 1),
         ay: new THREE.Vector3(0, 1, 0),
       };
+    case 'back-center':
+      return {
+        p: new THREE.Vector3(c.x, kitBox.min.y + size.y * 0.76, kitBox.min.z),
+        dir: new THREE.Vector3(0, 0, -1),
+        ax: new THREE.Vector3(-1, 0, 0),
+        ay: new THREE.Vector3(0, 1, 0),
+      };
     default:
       return {
         p: new THREE.Vector3(c.x, chestY, kitBox.max.z),
@@ -156,9 +164,20 @@ function computeDecalTransform(cfg, decalTarget, kitBox) {
 
   const inv = decalTarget.matrixRel.clone().invert();
   const posLocal = anchor.clone().applyMatrix4(inv);
-  const dirLocal = dir.clone().transformDirection(inv);
 
-  const q = new THREE.Quaternion().setFromUnitVectors(new THREE.Vector3(0, 0, 1), dirLocal);
+  // Base esplicita del proiettore in spazio mondo (z = normale uscente,
+  // y = alto, x = destra per chi guarda quella faccia): garantisce testo
+  // dritto e non specchiato su ogni lato, incluso il retro — con
+  // setFromUnitVectors il "roll" attorno alla direzione sarebbe arbitrario.
+  const zAxis = dir.clone().normalize();
+  const up = new THREE.Vector3(0, 1, 0);
+  const xAxis = new THREE.Vector3().crossVectors(up, zAxis).normalize();
+  const yAxis = new THREE.Vector3().crossVectors(zAxis, xAxis).normalize();
+  const worldBasis = new THREE.Matrix4().makeBasis(xAxis, yAxis, zAxis);
+  const meshRotInv = new THREE.Matrix4().extractRotation(inv);
+  const localBasis = new THREE.Matrix4().multiplyMatrices(meshRotInv, worldBasis);
+
+  const q = new THREE.Quaternion().setFromRotationMatrix(localBasis);
   q.multiply(
     new THREE.Quaternion().setFromAxisAngle(
       new THREE.Vector3(0, 0, 1),
@@ -180,7 +199,7 @@ function computeDecalTransform(cfg, decalTarget, kitBox) {
   return {
     position: [posLocal.x, posLocal.y, posLocal.z],
     rotation: [e.x, e.y, e.z],
-    scale: [s, s, s * 0.6],
+    scale: [s, s, s * 0.3],
   };
 }
 
@@ -227,14 +246,66 @@ function KitDecal({ cfg, decalTarget, kitBox }) {
   if (!texture) return null;
 
   return (
-    <Decal position={transform.position} rotation={transform.rotation} scale={transform.scale}>
-      <meshStandardMaterial
+    <Decal
+      position={transform.position}
+      rotation={transform.rotation}
+      scale={transform.scale}
+      renderOrder={10}
+    >
+      <meshBasicMaterial
         map={texture}
         transparent
+        toneMapped={false}
         depthWrite={false}
         polygonOffset
-        polygonOffsetFactor={-6}
-        roughness={0.7}
+        polygonOffsetFactor={-16}
+      />
+    </Decal>
+  );
+}
+
+function BackNameNumber({ cfg, decalTarget, kitBox }) {
+  const texture = useMemo(
+    () =>
+      cfg.name || cfg.number !== ''
+        ? createNameNumberTexture({ name: cfg.name, number: cfg.number, color: cfg.color })
+        : null,
+    [cfg.name, cfg.number, cfg.color]
+  );
+
+  useEffect(
+    () => () => {
+      if (texture) texture.dispose();
+    },
+    [texture]
+  );
+
+  const transform = useMemo(
+    () =>
+      computeDecalTransform(
+        { position: 'back-center', x: 0, y: 0, rotation: 0, scale: cfg.scale },
+        decalTarget,
+        kitBox
+      ),
+    [cfg.scale, decalTarget, kitBox]
+  );
+
+  if (!texture) return null;
+
+  return (
+    <Decal
+      position={transform.position}
+      rotation={transform.rotation}
+      scale={transform.scale}
+      renderOrder={10}
+    >
+      <meshBasicMaterial
+        map={texture}
+        transparent
+        toneMapped={false}
+        depthWrite={false}
+        polygonOffset
+        polygonOffsetFactor={-16}
       />
     </Decal>
   );
@@ -250,6 +321,7 @@ export default function ShirtModel() {
   const patterns = useKitStore((s) => s.patterns);
   const finish = useKitStore((s) => s.finish);
   const decals = useKitStore((s) => s.decals);
+  const backText = useKitStore((s) => s.backText);
 
   const { normScale, normPosition } = useMemo(() => {
     const size = kitBox.getSize(new THREE.Vector3());
@@ -326,6 +398,12 @@ export default function ShirtModel() {
                 decalTarget.mesh
               )
             : null
+        )}
+      {decalTarget &&
+        (backText.name || backText.number !== '') &&
+        createPortal(
+          <BackNameNumber cfg={backText} decalTarget={decalTarget} kitBox={kitBox} />,
+          decalTarget.mesh
         )}
     </group>
   );

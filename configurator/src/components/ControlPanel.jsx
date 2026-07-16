@@ -241,9 +241,59 @@ function DecalSlot({ slot, label }) {
   );
 }
 
+function BackTextSection() {
+  const backText = useKitStore((s) => s.backText);
+  const setBackText = useKitStore((s) => s.setBackText);
+
+  return (
+    <div className="flex flex-col gap-3 rounded-xl border border-slate-800 bg-slate-800/40 p-3">
+      <span className="text-sm font-medium text-slate-200">Nome e numero (retro spalle)</span>
+
+      <Field label="Nome">
+        <input
+          type="text"
+          maxLength={14}
+          value={backText.name}
+          onChange={(e) => setBackText({ name: e.target.value })}
+          placeholder="Es. ROSSI"
+          className="rounded-lg border border-slate-700 bg-slate-800 px-3 py-2 text-sm text-slate-200 outline-none focus:border-indigo-500"
+        />
+      </Field>
+
+      <Field label="Numero">
+        <input
+          type="number"
+          min={0}
+          max={99}
+          value={backText.number}
+          onChange={(e) => setBackText({ number: e.target.value.slice(0, 2) })}
+          placeholder="Es. 10"
+          className="rounded-lg border border-slate-700 bg-slate-800 px-3 py-2 text-sm text-slate-200 outline-none focus:border-indigo-500"
+        />
+      </Field>
+
+      <ColorRow
+        label="Colore testo"
+        value={backText.color}
+        onChange={(color) => setBackText({ color })}
+      />
+
+      <Slider
+        label="Dimensione"
+        value={backText.scale}
+        min={0.2}
+        max={0.6}
+        step={0.01}
+        onChange={(scale) => setBackText({ scale })}
+      />
+    </div>
+  );
+}
+
 function DecalsTab() {
   return (
     <div className="flex flex-col gap-4">
+      <BackTextSection />
       {DECAL_SLOTS.map(({ key, label }) => (
         <DecalSlot key={key} slot={key} label={label} />
       ))}

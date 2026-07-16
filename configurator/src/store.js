@@ -85,6 +85,12 @@ export const useKitStore = create((set) => ({
     team: defaultDecal('chest-left', 0.12),
     tech: defaultDecal('chest-right', 0.12),
   },
+  backText: {
+    name: '',
+    number: '',
+    color: '#ffffff',
+    scale: 0.42,
+  },
 
   setPartColor: (part, color) =>
     set((s) => ({ parts: { ...s.parts, [part]: { ...s.parts[part], color } } })),
@@ -99,4 +105,6 @@ export const useKitStore = create((set) => ({
 
   clearDecal: (slot) =>
     set((s) => ({ decals: { ...s.decals, [slot]: { ...s.decals[slot], src: null } } })),
+
+  setBackText: (patch) => set((s) => ({ backText: { ...s.backText, ...patch } })),
 }));
