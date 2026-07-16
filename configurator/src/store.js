@@ -1,4 +1,5 @@
 import { create } from 'zustand';
+import { DEFAULT_FONT_ID } from './utils/fonts';
 
 /**
  * Parti del kit. Il codice mappa le mesh del GLB su queste chiavi:
@@ -35,6 +36,22 @@ export const DECAL_POSITIONS = [
   { value: 'chest-right', label: 'Petto — destra' },
   { value: 'sleeve-left', label: 'Manica sinistra' },
   { value: 'sleeve-right', label: 'Manica destra' },
+  { value: 'shorts-right-low', label: 'Pantaloncino — basso destra' },
+  { value: 'shorts-left-low', label: 'Pantaloncino — basso sinistra' },
+  { value: 'sock-front', label: 'Calza — davanti (entrambe)' },
+];
+
+export const NAME_POSITIONS = [
+  { value: 'back-shoulders', label: 'Retro — spalle (sopra numero)' },
+  { value: 'back-below-number', label: 'Retro — sotto il numero' },
+];
+
+export const NUMBER_POSITIONS = [
+  { value: 'back-center', label: 'Retro — centro' },
+  { value: 'chest-left', label: 'Petto — sinistra' },
+  { value: 'chest-right', label: 'Petto — destra' },
+  { value: 'shorts-left-low', label: 'Pantaloncino — basso sinistra' },
+  { value: 'shorts-right-low', label: 'Pantaloncino — basso destra' },
 ];
 
 export const FINISHES = [
@@ -85,11 +102,23 @@ export const useKitStore = create((set) => ({
     team: defaultDecal('chest-left', 0.12),
     tech: defaultDecal('chest-right', 0.12),
   },
-  backText: {
-    name: '',
-    number: '',
+  // Font, colore e contorno sono condivisi da nome e numero: nel catalogo
+  // "Select your number" lo stile si sceglie una volta per tutto il kit.
+  lettering: {
+    fontId: DEFAULT_FONT_ID,
     color: '#ffffff',
-    scale: 0.42,
+    outlineColor: '#c8102e',
+    outlineWidth: 0,
+  },
+  playerName: {
+    text: '',
+    position: 'back-shoulders',
+    scale: 0.3,
+  },
+  playerNumber: {
+    text: '',
+    position: 'back-center',
+    scale: 0.34,
   },
 
   setPartColor: (part, color) =>
@@ -106,5 +135,9 @@ export const useKitStore = create((set) => ({
   clearDecal: (slot) =>
     set((s) => ({ decals: { ...s.decals, [slot]: { ...s.decals[slot], src: null } } })),
 
-  setBackText: (patch) => set((s) => ({ backText: { ...s.backText, ...patch } })),
+  setLettering: (patch) => set((s) => ({ lettering: { ...s.lettering, ...patch } })),
+
+  setPlayerName: (patch) => set((s) => ({ playerName: { ...s.playerName, ...patch } })),
+
+  setPlayerNumber: (patch) => set((s) => ({ playerNumber: { ...s.playerNumber, ...patch } })),
 }));

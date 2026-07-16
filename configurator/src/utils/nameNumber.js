@@ -1,34 +1,60 @@
 import * as THREE from 'three';
+import { fontString } from './fonts';
 
-/**
- * Texture trasparente con nome sulle spalle (in alto) e numero grande al
- * centro, da proiettare come decal sul retro della maglia.
- */
-export function createNameNumberTexture({ name = '', number = '', color = '#ffffff' }) {
-  const size = 512;
-  const canvas = document.createElement('canvas');
-  canvas.width = size;
-  canvas.height = size;
-  const ctx = canvas.getContext('2d');
-  ctx.clearRect(0, 0, size, size);
+const SIZE = 512;
+
+function drawGlyphs(ctx, text, cfg, sizePx) {
+  ctx.font = fontString(cfg.fontId, sizePx);
   ctx.textAlign = 'center';
-  ctx.fillStyle = color;
+  ctx.textBaseline = 'middle';
 
-  if (name) {
-    ctx.textBaseline = 'middle';
-    ctx.font = 'bold 64px "Arial Black", Arial, sans-serif';
-    ctx.fillText(name.toUpperCase(), size / 2, size * 0.16, size * 0.9);
+  const x = SIZE / 2;
+  const y = SIZE / 2;
+  const maxW = SIZE * 0.92;
+
+  if (cfg.outlineWidth > 0) {
+    ctx.strokeStyle = cfg.outlineColor;
+    // lineWidth è centrato sul tracciato: raddoppio così lo spessore
+    // richiesto resta interamente visibile fuori dalla lettera.
+    ctx.lineWidth = cfg.outlineWidth * 2;
+    ctx.lineJoin = 'round';
+    ctx.miterLimit = 2;
+    ctx.strokeText(text, x, y, maxW);
   }
 
-  if (number !== '' && number !== null && number !== undefined) {
-    ctx.textBaseline = 'middle';
-    ctx.font = 'bold 280px "Arial Black", Arial, sans-serif';
-    ctx.fillText(String(number), size / 2, size * 0.58, size * 0.9);
-  }
+  ctx.fillStyle = cfg.color;
+  ctx.fillText(text, x, y, maxW);
+}
 
+function toTexture(canvas) {
   const texture = new THREE.CanvasTexture(canvas);
   texture.colorSpace = THREE.SRGBColorSpace;
   texture.anisotropy = 8;
   texture.needsUpdate = true;
   return texture;
+}
+
+function makeCanvas() {
+  const canvas = document.createElement('canvas');
+  canvas.width = SIZE;
+  canvas.height = SIZE;
+  return canvas;
+}
+
+/** Texture trasparente con il solo numero, centrato. */
+export function createNumberTexture(cfg) {
+  const canvas = makeCanvas();
+  const ctx = canvas.getContext('2d');
+  // Un numero a due cifre riempie il riquadro; a una cifra resta più grande.
+  const sizePx = String(cfg.text).length > 1 ? 380 : 440;
+  drawGlyphs(ctx, String(cfg.text), cfg, sizePx);
+  return toTexture(canvas);
+}
+
+/** Texture trasparente con il solo nome, centrato. */
+export function createNameTexture(cfg) {
+  const canvas = makeCanvas();
+  const ctx = canvas.getContext('2d');
+  drawGlyphs(ctx, String(cfg.text).toUpperCase(), cfg, 150);
+  return toTexture(canvas);
 }

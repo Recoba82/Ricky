@@ -7,8 +7,11 @@ import {
   PATTERN_TYPES,
   DECAL_POSITIONS,
   DECAL_SLOTS,
+  NAME_POSITIONS,
+  NUMBER_POSITIONS,
   FINISHES,
 } from '../store';
+import { NUMBER_FONTS } from '../utils/fonts';
 
 const TABS = [
   { id: 'colors', label: 'Colori' },
@@ -241,51 +244,144 @@ function DecalSlot({ slot, label }) {
   );
 }
 
-function BackTextSection() {
-  const backText = useKitStore((s) => s.backText);
-  const setBackText = useKitStore((s) => s.setBackText);
+const textInputClass =
+  'rounded-lg border border-slate-700 bg-slate-800 px-3 py-2 text-sm text-slate-200 outline-none transition-colors focus:border-indigo-500';
+
+/** Anteprima del font: mostra "10" e "ROSSI" nello stile selezionato. */
+function FontPicker() {
+  const lettering = useKitStore((s) => s.lettering);
+  const setLettering = useKitStore((s) => s.setLettering);
 
   return (
-    <div className="flex flex-col gap-3 rounded-xl border border-slate-800 bg-slate-800/40 p-3">
-      <span className="text-sm font-medium text-slate-200">Nome e numero (retro spalle)</span>
+    <div className="flex flex-col gap-2">
+      <span className="text-sm text-slate-300">Font numero e nome</span>
+      <div className="grid max-h-56 grid-cols-2 gap-2 overflow-y-auto pr-1">
+        {NUMBER_FONTS.map((f) => (
+          <button
+            key={f.id}
+            onClick={() => setLettering({ fontId: f.id })}
+            title={f.hint}
+            className={`flex flex-col items-center rounded-lg border px-2 py-2 transition-colors ${
+              lettering.fontId === f.id
+                ? 'border-indigo-500 bg-indigo-500/10'
+                : 'border-slate-800 bg-slate-800/40 hover:border-slate-600'
+            }`}
+          >
+            <span
+              className="text-2xl leading-none text-slate-100"
+              style={{ fontFamily: `"${f.family}"`, fontWeight: f.weight }}
+            >
+              10
+            </span>
+            <span className="mt-1 text-[10px] text-slate-500">{f.label}</span>
+          </button>
+        ))}
+      </div>
+    </div>
+  );
+}
 
-      <Field label="Nome">
-        <input
-          type="text"
-          maxLength={14}
-          value={backText.name}
-          onChange={(e) => setBackText({ name: e.target.value })}
-          placeholder="Es. ROSSI"
-          className="rounded-lg border border-slate-700 bg-slate-800 px-3 py-2 text-sm text-slate-200 outline-none focus:border-indigo-500"
-        />
-      </Field>
+function LetteringSection() {
+  const lettering = useKitStore((s) => s.lettering);
+  const setLettering = useKitStore((s) => s.setLettering);
+  const playerName = useKitStore((s) => s.playerName);
+  const setPlayerName = useKitStore((s) => s.setPlayerName);
+  const playerNumber = useKitStore((s) => s.playerNumber);
+  const setPlayerNumber = useKitStore((s) => s.setPlayerNumber);
 
-      <Field label="Numero">
-        <input
-          type="number"
-          min={0}
-          max={99}
-          value={backText.number}
-          onChange={(e) => setBackText({ number: e.target.value.slice(0, 2) })}
-          placeholder="Es. 10"
-          className="rounded-lg border border-slate-700 bg-slate-800 px-3 py-2 text-sm text-slate-200 outline-none focus:border-indigo-500"
-        />
-      </Field>
+  return (
+    <div className="flex flex-col gap-4 rounded-xl border border-slate-800 bg-slate-800/40 p-3">
+      <span className="text-sm font-medium text-slate-200">Nome e numero</span>
+
+      <FontPicker />
 
       <ColorRow
         label="Colore testo"
-        value={backText.color}
-        onChange={(color) => setBackText({ color })}
+        value={lettering.color}
+        onChange={(color) => setLettering({ color })}
       />
 
       <Slider
-        label="Dimensione"
-        value={backText.scale}
-        min={0.2}
-        max={0.6}
-        step={0.01}
-        onChange={(scale) => setBackText({ scale })}
+        label="Contorno"
+        value={lettering.outlineWidth}
+        min={0}
+        max={14}
+        step={1}
+        onChange={(outlineWidth) => setLettering({ outlineWidth })}
+        format={(v) => (v === 0 ? 'nessuno' : `${v}`)}
       />
+      {lettering.outlineWidth > 0 && (
+        <ColorRow
+          label="Colore contorno"
+          value={lettering.outlineColor}
+          onChange={(outlineColor) => setLettering({ outlineColor })}
+        />
+      )}
+
+      <div className="flex flex-col gap-3 border-t border-slate-700/60 pt-3">
+        <Field label="Numero">
+          <input
+            type="number"
+            min={0}
+            max={99}
+            value={playerNumber.text}
+            onChange={(e) => setPlayerNumber({ text: e.target.value.slice(0, 2) })}
+            placeholder="Es. 10"
+            className={textInputClass}
+          />
+        </Field>
+        {playerNumber.text !== '' && (
+          <>
+            <Field label="Posizione numero">
+              <Select
+                value={playerNumber.position}
+                onChange={(position) => setPlayerNumber({ position })}
+                options={NUMBER_POSITIONS}
+              />
+            </Field>
+            <Slider
+              label="Dimensione numero"
+              value={playerNumber.scale}
+              min={0.08}
+              max={0.5}
+              step={0.01}
+              onChange={(scale) => setPlayerNumber({ scale })}
+            />
+          </>
+        )}
+      </div>
+
+      <div className="flex flex-col gap-3 border-t border-slate-700/60 pt-3">
+        <Field label="Nome">
+          <input
+            type="text"
+            maxLength={14}
+            value={playerName.text}
+            onChange={(e) => setPlayerName({ text: e.target.value })}
+            placeholder="Es. ROSSI"
+            className={textInputClass}
+          />
+        </Field>
+        {playerName.text !== '' && (
+          <>
+            <Field label="Posizione nome">
+              <Select
+                value={playerName.position}
+                onChange={(position) => setPlayerName({ position })}
+                options={NAME_POSITIONS}
+              />
+            </Field>
+            <Slider
+              label="Dimensione nome"
+              value={playerName.scale}
+              min={0.12}
+              max={0.5}
+              step={0.01}
+              onChange={(scale) => setPlayerName({ scale })}
+            />
+          </>
+        )}
+      </div>
     </div>
   );
 }
@@ -293,7 +389,7 @@ function BackTextSection() {
 function DecalsTab() {
   return (
     <div className="flex flex-col gap-4">
-      <BackTextSection />
+      <LetteringSection />
       {DECAL_SLOTS.map(({ key, label }) => (
         <DecalSlot key={key} slot={key} label={label} />
       ))}

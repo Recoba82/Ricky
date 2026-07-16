@@ -10,7 +10,9 @@ import {
   applySampler,
   getMeshNormalTexture,
 } from '../utils/patterns';
-import { createNameNumberTexture } from '../utils/nameNumber';
+import { createNameTexture, createNumberTexture } from '../utils/nameNumber';
+import { ensureFontLoaded } from '../utils/fonts';
+import { decalAnchors, computeDecalTransform } from '../utils/decalGeometry';
 
 export const MODEL_URL = `${import.meta.env.BASE_URL}models/psg-jordan-kit.glb`;
 
@@ -74,133 +76,21 @@ function prepareModel(scene) {
     });
   });
 
-  let decalTarget = null;
-  let bestVol = 0;
+  // Un bersaglio di proiezione per parte: la mesh più voluminosa di quella
+  // parte (le scansioni hanno più gusci sovrapposti, es. fodera interna dei
+  // pantaloncini, e il decal va sul guscio esterno).
+  const decalTargets = {};
+  const bestVol = {};
   for (const t of targets) {
-    if (t.part !== 'body') continue;
     const s = t.box.getSize(new THREE.Vector3());
     const vol = s.x * s.y * s.z;
-    if (vol > bestVol) {
-      bestVol = vol;
-      decalTarget = t;
+    if (vol > (bestVol[t.part] ?? 0)) {
+      bestVol[t.part] = vol;
+      decalTargets[t.part] = t;
     }
   }
 
-  return { root, targets, kitBox, decalTarget };
-}
-
-/* ---------- Calcolo trasformazioni decal ---------- */
-
-/**
- * Ancore di proiezione in coordinate della scena (pre-normalizzazione).
- * `p` è il punto sulla superficie, `dir` la direzione di proiezione,
- * `ax`/`ay` gli assi lungo cui si muovono gli offset X/Y dell'utente.
- */
-function decalAnchor(position, kitBox) {
-  const size = kitBox.getSize(new THREE.Vector3());
-  const c = kitBox.getCenter(new THREE.Vector3());
-  const chestY = kitBox.min.y + size.y * 0.79;
-  const badgeY = kitBox.min.y + size.y * 0.85;
-  switch (position) {
-    case 'chest-left':
-      return {
-        p: new THREE.Vector3(c.x - size.x * 0.13, badgeY, kitBox.max.z),
-        dir: new THREE.Vector3(0, 0, 1),
-        ax: new THREE.Vector3(1, 0, 0),
-        ay: new THREE.Vector3(0, 1, 0),
-      };
-    case 'chest-right':
-      return {
-        p: new THREE.Vector3(c.x + size.x * 0.13, badgeY, kitBox.max.z),
-        dir: new THREE.Vector3(0, 0, 1),
-        ax: new THREE.Vector3(1, 0, 0),
-        ay: new THREE.Vector3(0, 1, 0),
-      };
-    case 'sleeve-left':
-      return {
-        p: new THREE.Vector3(kitBox.min.x, badgeY, c.z),
-        dir: new THREE.Vector3(-1, 0, 0),
-        ax: new THREE.Vector3(0, 0, -1),
-        ay: new THREE.Vector3(0, 1, 0),
-      };
-    case 'sleeve-right':
-      return {
-        p: new THREE.Vector3(kitBox.max.x, badgeY, c.z),
-        dir: new THREE.Vector3(1, 0, 0),
-        ax: new THREE.Vector3(0, 0, 1),
-        ay: new THREE.Vector3(0, 1, 0),
-      };
-    case 'back-center':
-      return {
-        p: new THREE.Vector3(c.x, kitBox.min.y + size.y * 0.76, kitBox.min.z),
-        dir: new THREE.Vector3(0, 0, -1),
-        ax: new THREE.Vector3(-1, 0, 0),
-        ay: new THREE.Vector3(0, 1, 0),
-      };
-    default:
-      return {
-        p: new THREE.Vector3(c.x, chestY, kitBox.max.z),
-        dir: new THREE.Vector3(0, 0, 1),
-        ax: new THREE.Vector3(1, 0, 0),
-        ay: new THREE.Vector3(0, 1, 0),
-      };
-  }
-}
-
-/**
- * Converte l'ancora (spazio scena) in posizione/rotazione/scala locali alla
- * mesh bersaglio, usando la matrice relativa salvata in preparazione. La
- * rotazione allinea l'asse Z del decal alla direzione di proiezione
- * (worldToLocal della direzione) e aggiunge lo spin utente attorno ad essa.
- */
-function computeDecalTransform(cfg, decalTarget, kitBox) {
-  const size = kitBox.getSize(new THREE.Vector3());
-  const { p, dir, ax, ay } = decalAnchor(cfg.position, kitBox);
-
-  const anchor = p
-    .clone()
-    .addScaledVector(ax, cfg.x * size.x * 0.5)
-    .addScaledVector(ay, cfg.y * size.y * 0.25);
-
-  const inv = decalTarget.matrixRel.clone().invert();
-  const posLocal = anchor.clone().applyMatrix4(inv);
-
-  // Base esplicita del proiettore in spazio mondo (z = normale uscente,
-  // y = alto, x = destra per chi guarda quella faccia): garantisce testo
-  // dritto e non specchiato su ogni lato, incluso il retro — con
-  // setFromUnitVectors il "roll" attorno alla direzione sarebbe arbitrario.
-  const zAxis = dir.clone().normalize();
-  const up = new THREE.Vector3(0, 1, 0);
-  const xAxis = new THREE.Vector3().crossVectors(up, zAxis).normalize();
-  const yAxis = new THREE.Vector3().crossVectors(zAxis, xAxis).normalize();
-  const worldBasis = new THREE.Matrix4().makeBasis(xAxis, yAxis, zAxis);
-  const meshRotInv = new THREE.Matrix4().extractRotation(inv);
-  const localBasis = new THREE.Matrix4().multiplyMatrices(meshRotInv, worldBasis);
-
-  const q = new THREE.Quaternion().setFromRotationMatrix(localBasis);
-  q.multiply(
-    new THREE.Quaternion().setFromAxisAngle(
-      new THREE.Vector3(0, 0, 1),
-      (cfg.rotation * Math.PI) / 180
-    )
-  );
-  const e = new THREE.Euler().setFromQuaternion(q);
-
-  // Fattore di conversione scena -> spazio locale mesh (misura di un
-  // segmento noto trasformato), per mantenere la scala percepita costante.
-  const probe = size.y * 0.01;
-  const p2Local = anchor
-    .clone()
-    .add(new THREE.Vector3(0, probe, 0))
-    .applyMatrix4(inv);
-  const ratio = p2Local.sub(posLocal).length() / probe;
-  const s = cfg.scale * size.y * ratio;
-
-  return {
-    position: [posLocal.x, posLocal.y, posLocal.z],
-    rotation: [e.x, e.y, e.z],
-    scale: [s, s, s * 0.3],
-  };
+  return { root, targets, kitBox, decalTargets };
 }
 
 /* ---------- Texture del logo caricato ---------- */
@@ -235,43 +125,30 @@ function useDecalTexture(src) {
   return texture;
 }
 
-function KitDecal({ cfg, decalTarget, kitBox }) {
-  const texture = useDecalTexture(cfg.src);
+/**
+ * Texture di testo (nome o numero): il font va atteso prima di disegnare,
+ * altrimenti il canvas userebbe il fallback.
+ */
+function useTextTexture(make, cfg, enabled) {
+  const [texture, setTexture] = useState(null);
+  const key = `${cfg.text}|${cfg.fontId}|${cfg.color}|${cfg.outlineColor}|${cfg.outlineWidth}`;
 
-  const transform = useMemo(
-    () => computeDecalTransform(cfg, decalTarget, kitBox),
-    [cfg.position, cfg.x, cfg.y, cfg.rotation, cfg.scale, decalTarget, kitBox]
-  );
-
-  if (!texture) return null;
-
-  return (
-    <Decal
-      position={transform.position}
-      rotation={transform.rotation}
-      scale={transform.scale}
-      renderOrder={10}
-    >
-      <meshBasicMaterial
-        map={texture}
-        transparent
-        toneMapped={false}
-        depthWrite={false}
-        polygonOffset
-        polygonOffsetFactor={-16}
-      />
-    </Decal>
-  );
-}
-
-function BackNameNumber({ cfg, decalTarget, kitBox }) {
-  const texture = useMemo(
-    () =>
-      cfg.name || cfg.number !== ''
-        ? createNameNumberTexture({ name: cfg.name, number: cfg.number, color: cfg.color })
-        : null,
-    [cfg.name, cfg.number, cfg.color]
-  );
+  useEffect(() => {
+    if (!enabled) {
+      setTexture(null);
+      return undefined;
+    }
+    let cancelled = false;
+    ensureFontLoaded(cfg.fontId).then(() => {
+      if (cancelled) return;
+      setTexture(make(cfg));
+    });
+    return () => {
+      cancelled = true;
+    };
+    // `key` riassume tutti i campi di cfg che influenzano il disegno.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [key, enabled]);
 
   useEffect(
     () => () => {
@@ -280,34 +157,57 @@ function BackNameNumber({ cfg, decalTarget, kitBox }) {
     [texture]
   );
 
-  const transform = useMemo(
-    () =>
-      computeDecalTransform(
-        { position: 'back-center', x: 0, y: 0, rotation: 0, scale: cfg.scale },
-        decalTarget,
-        kitBox
-      ),
-    [cfg.scale, decalTarget, kitBox]
-  );
+  return texture;
+}
 
-  if (!texture) return null;
+/** Rende una decal per ogni ancora della posizione scelta. */
+function DecalGroup({ texture, position, cfg, decalTargets, kitBox }) {
+  const anchors = useMemo(() => decalAnchors(position, kitBox), [position, kitBox]);
 
+  return anchors.map((anchor, i) => {
+    const target = decalTargets[anchor.part];
+    if (!target || !texture) return null;
+    const t = computeDecalTransform(cfg, anchor, target, kitBox);
+    if (!t) return null;
+    return createPortal(
+      <Decal key={i} position={t.position} rotation={t.rotation} scale={t.scale} renderOrder={10}>
+        <meshBasicMaterial
+          map={texture}
+          transparent
+          toneMapped={false}
+          depthWrite={false}
+          polygonOffset
+          polygonOffsetFactor={-16}
+        />
+      </Decal>,
+      target.mesh
+    );
+  });
+}
+
+function LogoDecal({ cfg, decalTargets, kitBox }) {
+  const texture = useDecalTexture(cfg.src);
   return (
-    <Decal
-      position={transform.position}
-      rotation={transform.rotation}
-      scale={transform.scale}
-      renderOrder={10}
-    >
-      <meshBasicMaterial
-        map={texture}
-        transparent
-        toneMapped={false}
-        depthWrite={false}
-        polygonOffset
-        polygonOffsetFactor={-16}
-      />
-    </Decal>
+    <DecalGroup
+      texture={texture}
+      position={cfg.position}
+      cfg={cfg}
+      decalTargets={decalTargets}
+      kitBox={kitBox}
+    />
+  );
+}
+
+function LetteringDecal({ make, cfg, decalTargets, kitBox }) {
+  const texture = useTextTexture(make, cfg, cfg.text !== '' && cfg.text != null);
+  return (
+    <DecalGroup
+      texture={texture}
+      position={cfg.position}
+      cfg={{ ...cfg, x: 0, y: 0, rotation: 0 }}
+      decalTargets={decalTargets}
+      kitBox={kitBox}
+    />
   );
 }
 
@@ -315,13 +215,15 @@ function BackNameNumber({ cfg, decalTarget, kitBox }) {
 
 export default function ShirtModel() {
   const { scene } = useGLTF(MODEL_URL);
-  const { root, targets, kitBox, decalTarget } = useMemo(() => prepareModel(scene), [scene]);
+  const { root, targets, kitBox, decalTargets } = useMemo(() => prepareModel(scene), [scene]);
 
   const parts = useKitStore((s) => s.parts);
   const patterns = useKitStore((s) => s.patterns);
   const finish = useKitStore((s) => s.finish);
   const decals = useKitStore((s) => s.decals);
-  const backText = useKitStore((s) => s.backText);
+  const lettering = useKitStore((s) => s.lettering);
+  const playerName = useKitStore((s) => s.playerName);
+  const playerNumber = useKitStore((s) => s.playerNumber);
 
   const { normScale, normPosition } = useMemo(() => {
     const size = kitBox.getSize(new THREE.Vector3());
@@ -390,21 +292,23 @@ export default function ShirtModel() {
   return (
     <group scale={normScale} position={normPosition}>
       <primitive object={root} />
-      {decalTarget &&
-        Object.entries(decals).map(([slot, cfg]) =>
-          cfg.src
-            ? createPortal(
-                <KitDecal key={slot} cfg={cfg} decalTarget={decalTarget} kitBox={kitBox} />,
-                decalTarget.mesh
-              )
-            : null
-        )}
-      {decalTarget &&
-        (backText.name || backText.number !== '') &&
-        createPortal(
-          <BackNameNumber cfg={backText} decalTarget={decalTarget} kitBox={kitBox} />,
-          decalTarget.mesh
-        )}
+      {Object.entries(decals).map(([slot, cfg]) =>
+        cfg.src ? (
+          <LogoDecal key={slot} cfg={cfg} decalTargets={decalTargets} kitBox={kitBox} />
+        ) : null
+      )}
+      <LetteringDecal
+        make={createNumberTexture}
+        cfg={{ ...lettering, ...playerNumber }}
+        decalTargets={decalTargets}
+        kitBox={kitBox}
+      />
+      <LetteringDecal
+        make={createNameTexture}
+        cfg={{ ...lettering, ...playerName }}
+        decalTargets={decalTargets}
+        kitBox={kitBox}
+      />
     </group>
   );
 }
