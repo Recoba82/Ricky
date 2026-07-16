@@ -1,0 +1,17 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "kit-configurator",
+      "runtimeExecutable": "npm",
+      "runtimeArgs": ["--prefix", "configurator", "run", "dev"],
+      "port": 5173
+    },
+    {
+      "name": "kit-configurator-cra",
+      "runtimeExecutable": "npm",
+      "runtimeArgs": ["run", "start"],
+      "port": 3000
+    }
+  ]
+}

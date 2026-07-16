@@ -2,3 +2,5 @@ node_modules/
 debug-*.html
 debug.html
 error.png
+build/
+dist/

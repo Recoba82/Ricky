@@ -1,0 +1,120 @@
+* {
+  box-sizing: border-box;
+}
+
+html, body, #root {
+  height: 100%;
+  margin: 0;
+}
+
+body {
+  font-family: 'Segoe UI', Roboto, Arial, sans-serif;
+  background: #0b0e14;
+  color: #e6e8ee;
+}
+
+.app {
+  display: flex;
+  height: 100vh;
+  width: 100vw;
+}
+
+.viewer {
+  flex: 1;
+  min-width: 0;
+}
+
+.panel {
+  width: 340px;
+  flex-shrink: 0;
+  background: #161b25;
+  padding: 20px 22px;
+  overflow-y: auto;
+  border-left: 1px solid #262d3a;
+}
+
+.panel h1 {
+  font-size: 20px;
+  margin: 0 0 4px;
+}
+
+.subtitle {
+  font-size: 13px;
+  color: #93a0b4;
+  margin: 0 0 16px;
+}
+
+.section {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  margin-bottom: 20px;
+}
+
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  font-size: 13px;
+  color: #c3cbdb;
+}
+
+.field input[type='text'],
+.field input[type='number'],
+.field select,
+.field input[type='file'] {
+  background: #1e2530;
+  border: 1px solid #2c3444;
+  color: #e6e8ee;
+  border-radius: 6px;
+  padding: 7px 9px;
+  font-size: 13px;
+}
+
+.field-color {
+  flex-direction: row;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.field-color input[type='color'] {
+  width: 42px;
+  height: 28px;
+  border: none;
+  background: none;
+  cursor: pointer;
+}
+
+.download-btn {
+  width: 100%;
+  padding: 12px;
+  background: #3b5bdb;
+  border: none;
+  border-radius: 8px;
+  color: #fff;
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+  margin-top: 4px;
+}
+
+.download-btn:hover {
+  background: #34509f;
+}
+
+.credit {
+  font-size: 11px;
+  color: #6b7688;
+  line-height: 1.5;
+  margin-top: 18px;
+}
+
+.credit a {
+  color: #8ba3d9;
+}
+
+.loader {
+  color: #c3cbdb;
+  font-size: 14px;
+  white-space: nowrap;
+}
