@@ -1,0 +1,27 @@
+{
+  "name": "Configuratore 3D Kit",
+  "image": "mcr.microsoft.com/devcontainers/javascript-node:24-bookworm",
+
+  "features": {
+    "ghcr.io/devcontainers/features/github-cli:1": {}
+  },
+
+  // 5173 è il dev server Vite di configurator/ (porta fissata in vite.config.js).
+  "forwardPorts": [5173],
+  "portsAttributes": {
+    "5173": {
+      "label": "Configuratore 3D (Vite)",
+      "onAutoForward": "notify"
+    }
+  },
+
+  // Solo le dipendenze di configurator/: l'app CRA nella root è una tappa
+  // intermedia del lavoro e le sue dipendenze sono pesanti da installare.
+  "postCreateCommand": "npm install --prefix configurator",
+
+  "customizations": {
+    "vscode": {
+      "extensions": ["dbaeumer.vscode-eslint", "esbenp.prettier-vscode"]
+    }
+  }
+}
