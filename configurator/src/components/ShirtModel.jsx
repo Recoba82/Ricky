@@ -12,7 +12,7 @@ import {
 } from '../utils/patterns';
 import { createNameTexture, createNumberTexture } from '../utils/nameNumber';
 import { ensureFontLoaded } from '../utils/fonts';
-import { decalAnchors, computeDecalTransform } from '../utils/decalGeometry';
+import { placementAnchors, computeDecalTransform } from '../utils/decalGeometry';
 
 export const MODEL_URL = `${import.meta.env.BASE_URL}models/psg-jordan-kit.glb`;
 
@@ -90,7 +90,16 @@ function prepareModel(scene) {
     }
   }
 
-  return { root, targets, kitBox, decalTargets };
+  // Riquadro complessivo di ogni parte (unione delle sue mesh): è il
+  // riferimento su cui gli offset X/Y del piazzamento libero sono espressi.
+  const partBoxes = {};
+  for (const t of targets) {
+    partBoxes[t.part] = partBoxes[t.part]
+      ? partBoxes[t.part].union(t.box)
+      : t.box.clone();
+  }
+
+  return { root, targets, kitBox, decalTargets, partBoxes };
 }
 
 /* ---------- Texture del logo caricato ---------- */
@@ -160,12 +169,20 @@ function useTextTexture(make, cfg, enabled) {
   return texture;
 }
 
-/** Rende una decal per ogni ancora della posizione scelta. */
-function DecalGroup({ texture, position, cfg, decalTargets, kitBox }) {
-  const anchors = useMemo(() => decalAnchors(position, kitBox), [position, kitBox]);
+/** Rende una decal per ogni ancora del piazzamento (2 sui calzettoni speculari). */
+function DecalGroup({ texture, cfg, decalTargets, partBoxes, kitBox }) {
+  const target = decalTargets[cfg.part];
+  const partBox = partBoxes[cfg.part];
+
+  const anchors = useMemo(
+    () =>
+      partBox
+        ? placementAnchors(cfg, partBox, kitBox.getCenter(new THREE.Vector3()).x)
+        : [],
+    [cfg.part, cfg.face, cfg.x, cfg.y, cfg.mirror, partBox, kitBox]
+  );
 
   return anchors.map((anchor, i) => {
-    const target = decalTargets[anchor.part];
     if (!target || !texture) return null;
     const t = computeDecalTransform(cfg, anchor, target, kitBox);
     if (!t) return null;
@@ -185,37 +202,25 @@ function DecalGroup({ texture, position, cfg, decalTargets, kitBox }) {
   });
 }
 
-function LogoDecal({ cfg, decalTargets, kitBox }) {
+function LogoDecal({ cfg, ...rest }) {
   const texture = useDecalTexture(cfg.src);
-  return (
-    <DecalGroup
-      texture={texture}
-      position={cfg.position}
-      cfg={cfg}
-      decalTargets={decalTargets}
-      kitBox={kitBox}
-    />
-  );
+  return <DecalGroup texture={texture} cfg={cfg} {...rest} />;
 }
 
-function LetteringDecal({ make, cfg, decalTargets, kitBox }) {
+function LetteringDecal({ make, cfg, ...rest }) {
   const texture = useTextTexture(make, cfg, cfg.text !== '' && cfg.text != null);
-  return (
-    <DecalGroup
-      texture={texture}
-      position={cfg.position}
-      cfg={{ ...cfg, x: 0, y: 0, rotation: 0 }}
-      decalTargets={decalTargets}
-      kitBox={kitBox}
-    />
-  );
+  return <DecalGroup texture={texture} cfg={cfg} {...rest} />;
 }
 
 /* ---------- Componente principale ---------- */
 
 export default function ShirtModel() {
   const { scene } = useGLTF(MODEL_URL);
-  const { root, targets, kitBox, decalTargets } = useMemo(() => prepareModel(scene), [scene]);
+  const { root, targets, kitBox, decalTargets, partBoxes } = useMemo(
+    () => prepareModel(scene),
+    [scene]
+  );
+  const decalProps = { decalTargets, partBoxes, kitBox };
 
   const parts = useKitStore((s) => s.parts);
   const patterns = useKitStore((s) => s.patterns);
@@ -293,21 +298,17 @@ export default function ShirtModel() {
     <group scale={normScale} position={normPosition}>
       <primitive object={root} />
       {Object.entries(decals).map(([slot, cfg]) =>
-        cfg.src ? (
-          <LogoDecal key={slot} cfg={cfg} decalTargets={decalTargets} kitBox={kitBox} />
-        ) : null
+        cfg.src ? <LogoDecal key={slot} cfg={cfg} {...decalProps} /> : null
       )}
       <LetteringDecal
         make={createNumberTexture}
         cfg={{ ...lettering, ...playerNumber }}
-        decalTargets={decalTargets}
-        kitBox={kitBox}
+        {...decalProps}
       />
       <LetteringDecal
         make={createNameTexture}
         cfg={{ ...lettering, ...playerName }}
-        decalTargets={decalTargets}
-        kitBox={kitBox}
+        {...decalProps}
       />
     </group>
   );

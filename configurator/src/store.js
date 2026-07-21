@@ -30,28 +30,19 @@ export const PATTERN_TYPES = [
   { value: 'camo', label: 'Camouflage' },
 ];
 
-export const DECAL_POSITIONS = [
-  { value: 'chest-center', label: 'Petto — centro' },
-  { value: 'chest-left', label: 'Petto — sinistra' },
-  { value: 'chest-right', label: 'Petto — destra' },
-  { value: 'sleeve-left', label: 'Manica sinistra' },
-  { value: 'sleeve-right', label: 'Manica destra' },
-  { value: 'shorts-right-low', label: 'Pantaloncino — basso destra' },
-  { value: 'shorts-left-low', label: 'Pantaloncino — basso sinistra' },
-  { value: 'sock-front', label: 'Calza — davanti (entrambe)' },
+/** Capo su cui applicare un elemento: determina la mesh bersaglio. */
+export const PLACEMENT_PARTS = [
+  { value: 'body', label: 'Maglia' },
+  { value: 'shorts', label: 'Pantaloncini' },
+  { value: 'socks', label: 'Calzettoni' },
 ];
 
-export const NAME_POSITIONS = [
-  { value: 'back-shoulders', label: 'Retro — spalle (sopra numero)' },
-  { value: 'back-below-number', label: 'Retro — sotto il numero' },
-];
-
-export const NUMBER_POSITIONS = [
-  { value: 'back-center', label: 'Retro — centro' },
-  { value: 'chest-left', label: 'Petto — sinistra' },
-  { value: 'chest-right', label: 'Petto — destra' },
-  { value: 'shorts-left-low', label: 'Pantaloncino — basso sinistra' },
-  { value: 'shorts-right-low', label: 'Pantaloncino — basso destra' },
+/** Lato del capo verso cui proietta il decal. */
+export const PLACEMENT_FACES = [
+  { value: 'front', label: 'Davanti' },
+  { value: 'back', label: 'Dietro' },
+  { value: 'left', label: 'Lato sinistro' },
+  { value: 'right', label: 'Lato destro' },
 ];
 
 export const FINISHES = [
@@ -73,14 +64,23 @@ const defaultPattern = (type = 'none') => ({
   opacity: 1,
 });
 
-const defaultDecal = (position, scale) => ({
-  src: null,
-  position,
-  scale,
+/**
+ * Piazzamento libero: `part` sceglie il capo, `face` il lato, poi `x`/`y`
+ * (-1..1) spostano l'elemento sulla superficie di quella parte. `mirror`
+ * replica l'elemento su entrambi i gambali dei calzettoni.
+ */
+const placement = (over = {}) => ({
+  part: 'body',
+  face: 'front',
   x: 0,
   y: 0,
   rotation: 0,
+  scale: 0.2,
+  mirror: false,
+  ...over,
 });
+
+const defaultDecal = (over) => ({ src: null, ...placement(over) });
 
 export const useKitStore = create((set) => ({
   parts: {
@@ -98,9 +98,9 @@ export const useKitStore = create((set) => ({
   },
   finish: 'matte',
   decals: {
-    main: defaultDecal('chest-center', 0.2),
-    team: defaultDecal('chest-left', 0.12),
-    tech: defaultDecal('chest-right', 0.12),
+    main: defaultDecal({ scale: 0.2, y: 0.05 }),
+    team: defaultDecal({ scale: 0.12, x: -0.4, y: 0.45 }),
+    tech: defaultDecal({ scale: 0.12, x: 0.4, y: 0.45 }),
   },
   // Font, colore e contorno sono condivisi da nome e numero: nel catalogo
   // "Select your number" lo stile si sceglie una volta per tutto il kit.
@@ -110,15 +110,15 @@ export const useKitStore = create((set) => ({
     outlineColor: '#c8102e',
     outlineWidth: 0,
   },
+  // Default tarati sul retro maglia: nome alto sulle spalle, numero al
+  // centro, senza sovrapporsi. Da qui l'utente sposta tutto liberamente.
   playerName: {
     text: '',
-    position: 'back-shoulders',
-    scale: 0.3,
+    ...placement({ face: 'back', y: 0.76, scale: 0.17 }),
   },
   playerNumber: {
     text: '',
-    position: 'back-center',
-    scale: 0.34,
+    ...placement({ face: 'back', y: 0, scale: 0.23 }),
   },
 
   setPartColor: (part, color) =>

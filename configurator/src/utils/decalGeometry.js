@@ -1,87 +1,76 @@
 import * as THREE from 'three';
 
-const FRONT = () => new THREE.Vector3(0, 0, 1);
-const BACK = () => new THREE.Vector3(0, 0, -1);
-const AX_X = () => new THREE.Vector3(1, 0, 0);
-const AY_Y = () => new THREE.Vector3(0, 1, 0);
-
 /**
- * Ancore di proiezione in coordinate della scena (pre-normalizzazione).
- * Ritorna sempre un array: alcune posizioni (le calze) proiettano più
- * istanze dello stesso decal. Per ogni ancora: `part` è la parte del kit su
- * cui proiettare, `p` il punto sulla superficie, `dir` la direzione di
- * proiezione, `ax`/`ay` gli assi lungo cui agiscono gli offset X/Y utente.
- *
- * Le quote relative vengono dai bounding box reali del modello: pantaloncini
- * 0.39–0.65 in altezza (gambe separate attorno a ±0.20 in X dal centro),
- * calze 0.00–0.31 (i due gambali attorno a ±0.21 in X).
+ * Assi del proiettore per ogni lato del capo.
+ * `dir` = normale uscente, `ax` = destra per chi guarda quel lato,
+ * `ay` = alto. Con `ax` esplicito il testo non risulta mai specchiato.
  */
-export function decalAnchors(position, kitBox) {
-  const size = kitBox.getSize(new THREE.Vector3());
-  const c = kitBox.getCenter(new THREE.Vector3());
-  const atY = (rel) => kitBox.min.y + size.y * rel;
+const FACES = {
+  front: { dir: [0, 0, 1], ax: [1, 0, 0], ay: [0, 1, 0] },
+  back: { dir: [0, 0, -1], ax: [-1, 0, 0], ay: [0, 1, 0] },
+  left: { dir: [-1, 0, 0], ax: [0, 0, -1], ay: [0, 1, 0] },
+  right: { dir: [1, 0, 0], ax: [0, 0, 1], ay: [0, 1, 0] },
+};
 
-  switch (position) {
-    case 'chest-left':
-      return [
-        { part: 'body', p: new THREE.Vector3(c.x - size.x * 0.13, atY(0.85), kitBox.max.z), dir: FRONT(), ax: AX_X(), ay: AY_Y() },
-      ];
-    case 'chest-right':
-      return [
-        { part: 'body', p: new THREE.Vector3(c.x + size.x * 0.13, atY(0.85), kitBox.max.z), dir: FRONT(), ax: AX_X(), ay: AY_Y() },
-      ];
-    case 'sleeve-left':
-      return [
-        { part: 'body', p: new THREE.Vector3(kitBox.min.x, atY(0.85), c.z), dir: new THREE.Vector3(-1, 0, 0), ax: new THREE.Vector3(0, 0, -1), ay: AY_Y() },
-      ];
-    case 'sleeve-right':
-      return [
-        { part: 'body', p: new THREE.Vector3(kitBox.max.x, atY(0.85), c.z), dir: new THREE.Vector3(1, 0, 0), ax: new THREE.Vector3(0, 0, 1), ay: AY_Y() },
-      ];
-    case 'back-center':
-      return [
-        { part: 'body', p: new THREE.Vector3(c.x, atY(0.76), kitBox.min.z), dir: BACK(), ax: new THREE.Vector3(-1, 0, 0), ay: AY_Y() },
-      ];
-    case 'back-shoulders':
-      return [
-        { part: 'body', p: new THREE.Vector3(c.x, atY(0.92), kitBox.min.z), dir: BACK(), ax: new THREE.Vector3(-1, 0, 0), ay: AY_Y() },
-      ];
-    case 'back-below-number':
-      return [
-        { part: 'body', p: new THREE.Vector3(c.x, atY(0.64), kitBox.min.z), dir: BACK(), ax: new THREE.Vector3(-1, 0, 0), ay: AY_Y() },
-      ];
-    case 'shorts-right-low':
-      return [
-        { part: 'shorts', p: new THREE.Vector3(c.x + size.x * 0.2, atY(0.45), kitBox.max.z), dir: FRONT(), ax: AX_X(), ay: AY_Y() },
-      ];
-    case 'shorts-left-low':
-      return [
-        { part: 'shorts', p: new THREE.Vector3(c.x - size.x * 0.2, atY(0.45), kitBox.max.z), dir: FRONT(), ax: AX_X(), ay: AY_Y() },
-      ];
-    case 'sock-front':
-      // Un'istanza per gambale, sul davanti dello stinco (sopra il piede,
-      // che nel modello sporge verso +Z).
-      return [
-        { part: 'socks', p: new THREE.Vector3(c.x - size.x * 0.21, atY(0.22), kitBox.max.z), dir: FRONT(), ax: AX_X(), ay: AY_Y() },
-        { part: 'socks', p: new THREE.Vector3(c.x + size.x * 0.21, atY(0.22), kitBox.max.z), dir: FRONT(), ax: AX_X(), ay: AY_Y() },
-      ];
-    default:
-      return [
-        { part: 'body', p: new THREE.Vector3(c.x, atY(0.79), kitBox.max.z), dir: FRONT(), ax: AX_X(), ay: AY_Y() },
-      ];
-  }
+/** Semi-estensione della scatola lungo un asse unitario allineato agli assi. */
+function halfExtent(size, axis) {
+  return (Math.abs(axis.x) * size.x + Math.abs(axis.y) * size.y + Math.abs(axis.z) * size.z) / 2;
 }
 
 /**
- * Trova il punto reale della superficie sotto l'ancora, sparando un raggio da
- * fuori il kit lungo la direzione di proiezione. Serve perché la sola quota
- * del bounding box del kit non basta: i pantaloncini rientrano rispetto al
- * petto e le calze hanno i piedi che sporgono in avanti, quindi un'ancora
- * piazzata sul fronte del kit cadrebbe nel vuoto e il decal non verrebbe
- * proiettato su nulla. Ritorna null se il raggio non incontra la mesh.
+ * Punti di mira per un piazzamento libero: si sceglie la parte del kit e il
+ * lato, poi `x`/`y` (entrambi in -1..1) spostano il decal sulla superficie di
+ * quella parte, dal centro fino ai bordi.
+ *
+ * Ritorna un array perché i calzettoni ricevono un'istanza per gambale: il
+ * riquadro della parte viene diviso a metà sulla X del kit e il decal è
+ * piazzato sullo stesso punto relativo di ciascuna gamba.
  */
-function projectOntoSurface(point, dir, decalTarget, kitBox) {
-  const reach = kitBox.getSize(new THREE.Vector3()).length();
+export function placementAnchors(cfg, partBox, kitCenterX) {
+  const face = FACES[cfg.face] ?? FACES.front;
+  const dir = new THREE.Vector3(...face.dir);
+  const ax = new THREE.Vector3(...face.ax);
+  const ay = new THREE.Vector3(...face.ay);
+
+  const boxes = cfg.mirror
+    ? [
+        new THREE.Box3(
+          partBox.min.clone(),
+          new THREE.Vector3(kitCenterX, partBox.max.y, partBox.max.z)
+        ),
+        new THREE.Box3(
+          new THREE.Vector3(kitCenterX, partBox.min.y, partBox.min.z),
+          partBox.max.clone()
+        ),
+      ]
+    : [partBox];
+
+  return boxes.map((box) => {
+    const size = box.getSize(new THREE.Vector3());
+    const center = box.getCenter(new THREE.Vector3());
+    // Margine: al valore estremo il decal resta dentro il capo invece di
+    // finire a cavallo del bordo.
+    const spanX = halfExtent(size, ax) * 0.8;
+    const spanY = halfExtent(size, ay) * 0.8;
+
+    const p = center
+      .clone()
+      .addScaledVector(ax, cfg.x * spanX)
+      .addScaledVector(ay, cfg.y * spanY);
+
+    return { p, dir, ax, ay };
+  });
+}
+
+/**
+ * Trova il punto reale della superficie sotto il punto di mira, sparando un
+ * raggio da fuori il kit lungo la direzione di proiezione. Serve perché la
+ * sola quota del riquadro non basta: i pantaloncini rientrano rispetto al
+ * petto e le calze hanno i piedi che sporgono in avanti, quindi un punto
+ * ricavato dal riquadro cadrebbe nel vuoto e non verrebbe proiettato nulla.
+ * Ritorna null se il raggio non incontra la mesh.
+ */
+function projectOntoSurface(point, dir, decalTarget, reach) {
   const origin = point.clone().addScaledVector(dir, reach);
 
   const probe = new THREE.Mesh(decalTarget.mesh.geometry);
@@ -95,32 +84,21 @@ function projectOntoSurface(point, dir, decalTarget, kitBox) {
 
 /**
  * Converte l'ancora (spazio scena) in posizione/rotazione/scala locali alla
- * mesh bersaglio, usando la matrice relativa salvata in preparazione. La
- * rotazione allinea l'asse Z del decal alla direzione di proiezione
- * (worldToLocal della direzione) e aggiunge lo spin utente attorno ad essa.
- * Ritorna null se sotto l'ancora non c'è superficie.
+ * mesh bersaglio. Ritorna null se sotto l'ancora non c'è superficie.
  */
-export function computeDecalTransform(cfg, anchor0, decalTarget, kitBox) {
+export function computeDecalTransform(cfg, anchor, decalTarget, kitBox) {
   const size = kitBox.getSize(new THREE.Vector3());
-  const { p, dir, ax, ay } = anchor0;
+  const reach = size.length();
+  const { p, dir } = anchor;
 
-  // Gli offset utente spostano il punto di mira; il raggio poi trova la
-  // superficie sotto di esso, così il decal resta aderente al tessuto.
-  const aim = p
-    .clone()
-    .addScaledVector(ax, cfg.x * size.x * 0.5)
-    .addScaledVector(ay, cfg.y * size.y * 0.25);
-
-  const anchor = projectOntoSurface(aim, dir, decalTarget, kitBox);
-  if (!anchor) return null;
+  const hit = projectOntoSurface(p, dir, decalTarget, reach);
+  if (!hit) return null;
 
   const inv = decalTarget.matrixRel.clone().invert();
-  const posLocal = anchor.clone().applyMatrix4(inv);
+  const posLocal = hit.clone().applyMatrix4(inv);
 
-  // Base esplicita del proiettore in spazio mondo (z = normale uscente,
-  // y = alto, x = destra per chi guarda quella faccia): garantisce testo
-  // dritto e non specchiato su ogni lato, incluso il retro — con
-  // setFromUnitVectors il "roll" attorno alla direzione sarebbe arbitrario.
+  // Base esplicita del proiettore in spazio mondo, poi portata nello spazio
+  // locale della mesh: garantisce testo dritto e non specchiato su ogni lato.
   const zAxis = dir.clone().normalize();
   const up = new THREE.Vector3(0, 1, 0);
   const xAxis = new THREE.Vector3().crossVectors(up, zAxis).normalize();
@@ -138,13 +116,10 @@ export function computeDecalTransform(cfg, anchor0, decalTarget, kitBox) {
   );
   const e = new THREE.Euler().setFromQuaternion(q);
 
-  // Fattore di conversione scena -> spazio locale mesh (misura di un
-  // segmento noto trasformato), per mantenere la scala percepita costante.
+  // Fattore di conversione scena -> spazio locale mesh, per mantenere la
+  // scala percepita costante indipendentemente dalla mesh bersaglio.
   const probe = size.y * 0.01;
-  const p2Local = anchor
-    .clone()
-    .add(new THREE.Vector3(0, probe, 0))
-    .applyMatrix4(inv);
+  const p2Local = hit.clone().add(new THREE.Vector3(0, probe, 0)).applyMatrix4(inv);
   const ratio = p2Local.sub(posLocal).length() / probe;
   const s = cfg.scale * size.y * ratio;
 

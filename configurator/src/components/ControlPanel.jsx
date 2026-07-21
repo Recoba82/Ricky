@@ -5,10 +5,9 @@ import {
   PART_LABELS,
   PATTERN_PARTS,
   PATTERN_TYPES,
-  DECAL_POSITIONS,
   DECAL_SLOTS,
-  NAME_POSITIONS,
-  NUMBER_POSITIONS,
+  PLACEMENT_PARTS,
+  PLACEMENT_FACES,
   FINISHES,
 } from '../store';
 import { NUMBER_FONTS } from '../utils/fonts';
@@ -161,6 +160,78 @@ function PatternsTab() {
 
 /* ---------- Tab Loghi ---------- */
 
+/**
+ * Controlli di piazzamento libero, condivisi da loghi, nome e numero: si
+ * sceglie capo e lato, poi si posiziona l'elemento dove si vuole su quella
+ * superficie. Nessuna posizione preimpostata.
+ */
+function PlacementControls({ cfg, onChange, scaleRange = [0.05, 0.5] }) {
+  return (
+    <>
+      <div className="grid grid-cols-2 gap-2">
+        <Field label="Capo">
+          <Select
+            value={cfg.part}
+            onChange={(part) => onChange({ part, mirror: part === 'socks' ? cfg.mirror : false })}
+            options={PLACEMENT_PARTS}
+          />
+        </Field>
+        <Field label="Lato">
+          <Select value={cfg.face} onChange={(face) => onChange({ face })} options={PLACEMENT_FACES} />
+        </Field>
+      </div>
+
+      {cfg.part === 'socks' && (
+        <label className="flex items-center gap-2 text-sm text-slate-300">
+          <input
+            type="checkbox"
+            checked={cfg.mirror}
+            onChange={(e) => onChange({ mirror: e.target.checked })}
+            className="h-4 w-4 accent-indigo-500"
+          />
+          Applica a entrambe le calze
+        </label>
+      )}
+
+      <Slider
+        label="Posizione orizzontale"
+        value={cfg.x}
+        min={-1}
+        max={1}
+        step={0.02}
+        onChange={(x) => onChange({ x })}
+        format={(v) => v.toFixed(2)}
+      />
+      <Slider
+        label="Posizione verticale"
+        value={cfg.y}
+        min={-1}
+        max={1}
+        step={0.02}
+        onChange={(y) => onChange({ y })}
+        format={(v) => v.toFixed(2)}
+      />
+      <Slider
+        label="Dimensione"
+        value={cfg.scale}
+        min={scaleRange[0]}
+        max={scaleRange[1]}
+        step={0.01}
+        onChange={(scale) => onChange({ scale })}
+      />
+      <Slider
+        label="Rotazione"
+        value={cfg.rotation}
+        min={-180}
+        max={180}
+        step={1}
+        onChange={(rotation) => onChange({ rotation })}
+        format={(v) => `${v}°`}
+      />
+    </>
+  );
+}
+
 function DecalSlot({ slot, label }) {
   const cfg = useKitStore((s) => s.decals[slot]);
   const setDecal = useKitStore((s) => s.setDecal);
@@ -197,48 +268,11 @@ function DecalSlot({ slot, label }) {
       />
 
       {cfg.src && (
-        <>
-          <Field label="Posizione">
-            <Select
-              value={cfg.position}
-              onChange={(position) => setDecal(slot, { position })}
-              options={DECAL_POSITIONS}
-            />
-          </Field>
-          <Slider
-            label="Scala"
-            value={cfg.scale}
-            min={0.05}
-            max={0.5}
-            step={0.01}
-            onChange={(scale) => setDecal(slot, { scale })}
-          />
-          <Slider
-            label="Posizione X"
-            value={cfg.x}
-            min={-1}
-            max={1}
-            step={0.02}
-            onChange={(x) => setDecal(slot, { x })}
-          />
-          <Slider
-            label="Posizione Y"
-            value={cfg.y}
-            min={-1}
-            max={1}
-            step={0.02}
-            onChange={(y) => setDecal(slot, { y })}
-          />
-          <Slider
-            label="Rotazione"
-            value={cfg.rotation}
-            min={-180}
-            max={180}
-            step={1}
-            onChange={(rotation) => setDecal(slot, { rotation })}
-            format={(v) => `${v}°`}
-          />
-        </>
+        <PlacementControls
+          cfg={cfg}
+          onChange={(patch) => setDecal(slot, patch)}
+          scaleRange={[0.05, 0.5]}
+        />
       )}
     </div>
   );
@@ -331,23 +365,11 @@ function LetteringSection() {
           />
         </Field>
         {playerNumber.text !== '' && (
-          <>
-            <Field label="Posizione numero">
-              <Select
-                value={playerNumber.position}
-                onChange={(position) => setPlayerNumber({ position })}
-                options={NUMBER_POSITIONS}
-              />
-            </Field>
-            <Slider
-              label="Dimensione numero"
-              value={playerNumber.scale}
-              min={0.08}
-              max={0.5}
-              step={0.01}
-              onChange={(scale) => setPlayerNumber({ scale })}
-            />
-          </>
+          <PlacementControls
+            cfg={playerNumber}
+            onChange={setPlayerNumber}
+            scaleRange={[0.08, 0.5]}
+          />
         )}
       </div>
 
@@ -363,23 +385,7 @@ function LetteringSection() {
           />
         </Field>
         {playerName.text !== '' && (
-          <>
-            <Field label="Posizione nome">
-              <Select
-                value={playerName.position}
-                onChange={(position) => setPlayerName({ position })}
-                options={NAME_POSITIONS}
-              />
-            </Field>
-            <Slider
-              label="Dimensione nome"
-              value={playerName.scale}
-              min={0.12}
-              max={0.5}
-              step={0.01}
-              onChange={(scale) => setPlayerName({ scale })}
-            />
-          </>
+          <PlacementControls cfg={playerName} onChange={setPlayerName} scaleRange={[0.12, 0.5]} />
         )}
       </div>
     </div>
