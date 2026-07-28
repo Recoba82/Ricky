@@ -58,13 +58,57 @@ function hexToHsl(hex) {
   return rgbToHsl((v >> 16) & 255, (v >> 8) & 255, v & 255);
 }
 
+/* ---------- Sfocatura (box blur separabile) ---------- */
+
+function clampInt(v, lo, hi) {
+  return v < lo ? lo : v > hi ? hi : v;
+}
+
+/**
+ * Box blur separabile su una mappa scalare (usata sulla luminosità). Con un
+ * raggio ampio appiattisce dettagli piccoli e ad alto contrasto - stemmi,
+ * scritte, contorni stampati - mantenendo le variazioni ampie e graduali
+ * dovute a pieghe e ombreggiatura naturale del tessuto scansionato.
+ */
+function boxBlur(src, w, h, radius) {
+  if (radius <= 0) return src.slice();
+  const tmp = new Float32Array(w * h);
+  const out = new Float32Array(w * h);
+  const size = radius * 2 + 1;
+
+  for (let y = 0; y < h; y++) {
+    const row = y * w;
+    let acc = 0;
+    for (let x = -radius; x <= radius; x++) acc += src[row + clampInt(x, 0, w - 1)];
+    for (let x = 0; x < w; x++) {
+      tmp[row + x] = acc / size;
+      const addX = clampInt(x + radius + 1, 0, w - 1);
+      const subX = clampInt(x - radius, 0, w - 1);
+      acc += src[row + addX] - src[row + subX];
+    }
+  }
+
+  for (let x = 0; x < w; x++) {
+    let acc = 0;
+    for (let y = -radius; y <= radius; y++) acc += tmp[clampInt(y, 0, h - 1) * w + x];
+    for (let y = 0; y < h; y++) {
+      out[y * w + x] = acc / size;
+      const addY = clampInt(y + radius + 1, 0, h - 1);
+      const subY = clampInt(y - radius, 0, h - 1);
+      acc += tmp[addY * w + x] - tmp[subY * w + x];
+    }
+  }
+
+  return out;
+}
+
 /* ---------- Analisi texture originale ---------- */
 
 /**
  * Analizza la texture fotogrammetrica di una mesh e precalcola ciò che serve
- * al repaint: tonalità dominante del tessuto (per distinguere tessuto da
- * loghi stampati) e luminosità media del tessuto pulito (per cancellare i
- * loghi appiattendone la luminanza).
+ * al repaint: tonalità dominante del tessuto (per pesare la luminosità media)
+ * e una mappa di luminosità sfocata su tutta la texture, usata per cancellare
+ * loghi e scritte stampate mantenendone solo l'ombreggiatura di piega.
  */
 export function analyzeTexture(image) {
   const canvas = document.createElement('canvas');
@@ -80,29 +124,37 @@ export function analyzeTexture(image) {
   let sumSin = 0;
   let sumCos = 0;
   let weightTotal = 0;
-  for (let i = 0; i < data.length; i += 4) {
-    const [h2, s] = rgbToHsl(data[i], data[i + 1], data[i + 2]);
+  const lum = new Float32Array(w * h);
+  for (let i = 0, p = 0; i < data.length; i += 4, p++) {
+    const [h2, s, l] = rgbToHsl(data[i], data[i + 1], data[i + 2]);
     sumSin += Math.sin((h2 * Math.PI) / 180) * s;
     sumCos += Math.cos((h2 * Math.PI) / 180) * s;
     weightTotal += s;
+    lum[p] = l;
   }
   const rawHue = weightTotal > 0 ? (Math.atan2(sumSin, sumCos) * 180) / Math.PI : 220;
   const referenceHue = ((rawHue % 360) + 360) % 360;
 
+  // Raggio proporzionale alla texture: abbastanza ampio da coprire stemmi e
+  // scritte stampate, abbastanza piccolo da non appiattire le pieghe più
+  // ampie del capo.
+  const blurRadius = Math.max(2, Math.round(Math.max(w, h) * 0.045));
+  const blurredLum = boxBlur(lum, w, h, blurRadius);
+
   let fabricLumSum = 0;
   let fabricWeightSum = 0;
-  for (let i = 0; i < data.length; i += 4) {
-    const [h2, s, l] = rgbToHsl(data[i], data[i + 1], data[i + 2]);
+  for (let i = 0, p = 0; i < data.length; i += 4, p++) {
+    const [h2, s] = rgbToHsl(data[i], data[i + 1], data[i + 2]);
     const dist = hueDistance(h2, referenceHue);
     const satWeight = THREE.MathUtils.smoothstep(s, 0.06, 0.22);
     const hueWeight = 1 - THREE.MathUtils.smoothstep(dist, 25, 70);
     const fabricWeight = satWeight * hueWeight;
-    fabricLumSum += l * fabricWeight;
+    fabricLumSum += blurredLum[p] * fabricWeight;
     fabricWeightSum += fabricWeight;
   }
   const fabricLum = fabricWeightSum > 0.001 ? fabricLumSum / fabricWeightSum : 0.15;
 
-  return { imageData, width: w, height: h, referenceHue, fabricLum };
+  return { imageData, width: w, height: h, referenceHue, fabricLum, blurredLum };
 }
 
 /* ---------- Generatori di pattern in spazio UV ---------- */
@@ -155,14 +207,15 @@ function patternTone(u, v, type, scale) {
 
 /**
  * Ridipinge la texture analizzata con colore base + pattern, cancellando il
- * branding originale: la tonalità viene sostituita ovunque, e la luminanza
- * dei pixel "non tessuto" (loghi) viene tirata verso la media del tessuto,
- * eliminandone la sagoma. La luminosità relativa di ogni pixel rispetto alla
- * media viene mantenuta come fattore di ombreggiatura (pieghe/AO) e
- * riapplicata sopra la luminosità del colore target.
+ * branding originale: la tonalità viene sostituita ovunque e l'ombreggiatura
+ * usata per ogni pixel viene presa dalla mappa di luminosità sfocata (non dal
+ * pixel originale), così stemmi, loghi e scritte stampate - anche quando
+ * condividono la tonalità del tessuto - spariscono insieme al resto del
+ * dettaglio ad alta frequenza. Restano solo le variazioni ampie di
+ * piega/ombreggiatura, riapplicate sopra la luminosità del colore target.
  */
 export function repaintTexture(analysis, { baseColor, pattern }) {
-  const { imageData, width, height, referenceHue, fabricLum } = analysis;
+  const { imageData, width, height, fabricLum, blurredLum } = analysis;
   const baseHsl = hexToHsl(baseColor);
   const patHsl = hexToHsl(pattern.color);
   const patDarkHsl = [patHsl[0], patHsl[1], Math.max(0.05, patHsl[2] * 0.55)];
@@ -174,15 +227,9 @@ export function repaintTexture(analysis, { baseColor, pattern }) {
   for (let y = 0; y < height; y++) {
     for (let x = 0; x < width; x++) {
       const i = (y * width + x) * 4;
-      const [h, s, l] = rgbToHsl(src[i], src[i + 1], src[i + 2]);
+      const p = y * width + x;
 
-      const dist = hueDistance(h, referenceHue);
-      const satWeight = THREE.MathUtils.smoothstep(s, 0.06, 0.22);
-      const hueWeight = 1 - THREE.MathUtils.smoothstep(dist, 25, 70);
-      const brandWeight = 1 - satWeight * hueWeight;
-
-      const blendedL = l * (1 - brandWeight) + fabricLum * brandWeight;
-      const shade = THREE.MathUtils.clamp(blendedL / safeLum, 0.35, 2.2);
+      const shade = THREE.MathUtils.clamp(blurredLum[p] / safeLum, 0.35, 2.2);
 
       const u = x / width;
       const v = y / height;
@@ -247,14 +294,16 @@ export function applySampler(texture, sampler) {
   texture.needsUpdate = true;
 }
 
-/* ---------- Normal map "mesh traforato" ---------- */
+/* ---------- Normal map "trama tessuto" ---------- */
 
 let meshNormalCache = null;
 
 /**
  * Normal map procedurale a pori (generata una sola volta e condivisa) che
  * simula la trama traforata del tessuto sportivo. Altezze pseudocasuali ->
- * gradiente -> normale in tangent space.
+ * gradiente -> normale in tangent space. Usata di default su ogni finitura
+ * per dare rilievo micro-superficiale realistico, non solo sulla finitura
+ * "Mesh tecnico".
  */
 export function getMeshNormalTexture() {
   if (meshNormalCache) return meshNormalCache;
