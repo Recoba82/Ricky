@@ -65,10 +65,7 @@ function clampInt(v, lo, hi) {
 }
 
 /**
- * Box blur separabile su una mappa scalare (usata sulla luminosità). Con un
- * raggio ampio appiattisce dettagli piccoli e ad alto contrasto - stemmi,
- * scritte, contorni stampati - mantenendo le variazioni ampie e graduali
- * dovute a pieghe e ombreggiatura naturale del tessuto scansionato.
+ * Box blur separabile su una mappa scalare (usata sulla luminosità).
  */
 function boxBlur(src, w, h, radius) {
   if (radius <= 0) return src.slice();
@@ -102,13 +99,30 @@ function boxBlur(src, w, h, radius) {
   return out;
 }
 
+/**
+ * Sfocatura forte in tre passate (approssima una gaussiana ad ampio raggio):
+ * appiattisce del tutto dettagli piccoli e ad alto contrasto - stemmi,
+ * scritte, contorni stampati, anche quelli con contrasto marcato - mentre le
+ * variazioni ampie e graduali dovute a pieghe/ombreggiatura del tessuto
+ * scansionato, che si estendono su porzioni molto più grandi della texture,
+ * restano sostanzialmente intatte.
+ */
+function strongBlur(src, w, h, radius) {
+  let out = src;
+  for (let pass = 0; pass < 3; pass++) {
+    out = boxBlur(out, w, h, radius);
+  }
+  return out;
+}
+
 /* ---------- Analisi texture originale ---------- */
 
 /**
  * Analizza la texture fotogrammetrica di una mesh e precalcola ciò che serve
  * al repaint: tonalità dominante del tessuto (per pesare la luminosità media)
- * e una mappa di luminosità sfocata su tutta la texture, usata per cancellare
- * loghi e scritte stampate mantenendone solo l'ombreggiatura di piega.
+ * e una mappa di luminosità fortemente sfocata su tutta la texture, usata per
+ * cancellare loghi e scritte stampate mantenendone solo l'ombreggiatura di
+ * piega.
  */
 export function analyzeTexture(image) {
   const canvas = document.createElement('canvas');
@@ -135,11 +149,11 @@ export function analyzeTexture(image) {
   const rawHue = weightTotal > 0 ? (Math.atan2(sumSin, sumCos) * 180) / Math.PI : 220;
   const referenceHue = ((rawHue % 360) + 360) % 360;
 
-  // Raggio proporzionale alla texture: abbastanza ampio da coprire stemmi e
-  // scritte stampate, abbastanza piccolo da non appiattire le pieghe più
+  // Raggio ampio e tre passate: sufficiente a coprire stemmi, loghi e scritte
+  // stampate di varie dimensioni, restando comunque più piccolo delle pieghe
   // ampie del capo.
-  const blurRadius = Math.max(2, Math.round(Math.max(w, h) * 0.045));
-  const blurredLum = boxBlur(lum, w, h, blurRadius);
+  const blurRadius = Math.max(2, Math.round(Math.max(w, h) * 0.05));
+  const blurredLum = strongBlur(lum, w, h, blurRadius);
 
   let fabricLumSum = 0;
   let fabricWeightSum = 0;
@@ -210,9 +224,10 @@ function patternTone(u, v, type, scale) {
  * branding originale: la tonalità viene sostituita ovunque e l'ombreggiatura
  * usata per ogni pixel viene presa dalla mappa di luminosità sfocata (non dal
  * pixel originale), così stemmi, loghi e scritte stampate - anche quando
- * condividono la tonalità del tessuto - spariscono insieme al resto del
- * dettaglio ad alta frequenza. Restano solo le variazioni ampie di
- * piega/ombreggiatura, riapplicate sopra la luminosità del colore target.
+ * condividono la tonalità del tessuto o hanno un contrasto marcato -
+ * spariscono insieme al resto del dettaglio ad alta frequenza. Restano solo
+ * le variazioni ampie di piega/ombreggiatura, riapplicate sopra la
+ * luminosità del colore target.
  */
 export function repaintTexture(analysis, { baseColor, pattern }) {
   const { imageData, width, height, fabricLum, blurredLum } = analysis;
