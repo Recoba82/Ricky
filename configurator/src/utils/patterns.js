@@ -152,7 +152,7 @@ export function analyzeTexture(image) {
   // Raggio ampio e tre passate: sufficiente a coprire stemmi, loghi e scritte
   // stampate di varie dimensioni, restando comunque più piccolo delle pieghe
   // ampie del capo.
-    const blurRadius = Math.max(2, Math.round(Math.max(w, h) * 0.15));
+        const blurRadius = Math.max(2, Math.round(Math.max(w, h) * 0.35));
   const blurredLum = strongBlur(lum, w, h, blurRadius);
 
   let fabricLumSum = 0;
