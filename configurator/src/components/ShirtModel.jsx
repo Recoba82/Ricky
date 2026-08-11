@@ -170,14 +170,18 @@ function useTextTexture(make, cfg, enabled) {
 }
 
 /** Rende una decal per ogni ancora del piazzamento (2 sui calzettoni speculari). */
-function DecalGroup({ texture, cfg, decalTargets, partBoxes, kitBox }) {
+function DecalGroup({ texture, cfg, targets, decalTargets, partBoxes, kitBox }) {
   const target = decalTargets[cfg.part];
   const partBox = partBoxes[cfg.part];
 
-  // Gusci esterni del kit (uno per parte): il decal viene proiettato su tutti
-  // quelli toccati dal riquadro, cosi' la grafica non si taglia sulle cuciture
-  // e resta sopra colore e pattern di ogni parte.
-  const shells = useMemo(() => Object.values(decalTargets), [decalTargets]);
+  // Tutte le mesh del kit: il decal viene proiettato su ognuna toccata dal
+  // riquadro, cosi' la grafica non si taglia sulle cuciture ne' sui pannelli
+  // (maniche destra/sinistra, bande, colletto) e resta sopra colore e pattern
+  // di ogni parte.
+  const shells = useMemo(
+    () => (targets && targets.length > 0 ? targets : Object.values(decalTargets)),
+    [targets, decalTargets]
+  );
 
   const anchors = useMemo(
     () =>
@@ -189,8 +193,8 @@ function DecalGroup({ texture, cfg, decalTargets, partBoxes, kitBox }) {
 
   return anchors.flatMap((anchor, i) => {
     if (!target || !texture) return [];
-    return computeDecalTransforms(cfg, anchor, target, shells, kitBox).map((t) => (
-      <React.Fragment key={i + '-' + t.target.part}>
+    return computeDecalTransforms(cfg, anchor, target, shells, kitBox).map((t, j) => (
+      <React.Fragment key={i + '-' + j}>
         {createPortal(
           <Decal position={t.position} rotation={t.rotation} scale={t.scale} renderOrder={10}>
             <meshBasicMaterial
@@ -227,7 +231,7 @@ export default function ShirtModel() {
     () => prepareModel(scene),
     [scene]
   );
-  const decalProps = { decalTargets, partBoxes, kitBox };
+  const decalProps = { targets, decalTargets, partBoxes, kitBox };
 
   const parts = useKitStore((s) => s.parts);
   const patterns = useKitStore((s) => s.patterns);
