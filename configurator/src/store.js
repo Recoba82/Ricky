@@ -26,7 +26,16 @@ export const PATTERN_TYPES = [
   { value: 'none', label: 'Tinta unita' },
   { value: 'stripes', label: 'Strisce verticali' },
   { value: 'hoops', label: 'Strisce orizzontali' },
+  { value: 'pinstripe', label: 'Righe sottili' },
   { value: 'checker', label: 'Scacchi' },
+  { value: 'diagonal', label: 'Diagonali' },
+  { value: 'chevron', label: 'Chevron' },
+  { value: 'sash', label: 'Banda diagonale' },
+  { value: 'grid', label: 'Griglia tecnica' },
+  { value: 'dots', label: 'Pois' },
+  { value: 'halftone', label: 'Halftone sfumato' },
+  { value: 'hex', label: 'Esagoni' },
+  { value: 'gradient', label: 'Sfumatura' },
   { value: 'camo', label: 'Camouflage' },
 ];
 
@@ -51,10 +60,14 @@ export const FINISHES = [
   { value: 'mesh', label: 'Mesh / Traforato', hint: 'Normal map a pori per tessuto sportivo' },
 ];
 
+/**
+ * Slot di loghi caricabili dall'utente. Lo sponsor tecnico non e' piu' qui:
+ * il suo logo viene applicato sempre dal modello (TECH_LOGO_PLACEMENTS in
+ * ShirtModel), ricolorato in base al colore della parte.
+ */
 export const DECAL_SLOTS = [
   { key: 'main', label: 'Sponsor principale' },
   { key: 'team', label: 'Logo squadra' },
-  { key: 'tech', label: 'Sponsor tecnico' },
 ];
 
 const defaultPattern = (type = 'none') => ({
@@ -100,7 +113,6 @@ export const useKitStore = create((set) => ({
   decals: {
     main: defaultDecal({ scale: 0.2, y: 0.05 }),
     team: defaultDecal({ scale: 0.12, x: -0.4, y: 0.45 }),
-    tech: defaultDecal({ scale: 0.12, x: 0.4, y: 0.45 }),
   },
   // Font, colore e contorno sono condivisi da nome e numero: nel catalogo
   // "Select your number" lo stile si sceglie una volta per tutto il kit.
