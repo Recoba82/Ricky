@@ -195,6 +195,8 @@ function valueNoise(u, v) {
 /**
  * Ritorna il "tono" del pattern per un punto UV:
  * 0 = colore base, 1 = colore pattern, 2 = colore pattern scurito (camo).
+ * I valori frazionari tra 0 e 1 indicano una miscela parziale del colore
+ * pattern: servono ai pattern sfumati (gradiente, halftone).
  */
 function patternTone(u, v, type, scale) {
   switch (type) {
@@ -204,6 +206,46 @@ function patternTone(u, v, type, scale) {
       return Math.floor(v * scale) % 2 === 0 ? 0 : 1;
     case 'checker':
       return (Math.floor(u * scale) + Math.floor(v * scale)) % 2;
+    case 'pinstripe': {
+      const f = (u * scale * 1.6) % 1;
+      return f < 0.16 ? 1 : 0;
+    }
+    case 'diagonal':
+      return Math.floor((u + v) * scale) % 2 === 0 ? 0 : 1;
+    case 'chevron': {
+      const zig = Math.abs(((u * scale) % 2) - 1);
+      return Math.floor(v * scale + zig) % 2 === 0 ? 0 : 1;
+    }
+    case 'sash': {
+      const d = (u + (1 - v)) / 2;
+      return d > 0.44 && d < 0.6 ? 1 : 0;
+    }
+    case 'grid': {
+      const fu = (u * scale) % 1;
+      const fv = (v * scale) % 1;
+      return fu < 0.08 || fv < 0.08 ? 1 : 0;
+    }
+    case 'dots': {
+      const cx = ((u * scale) % 1) - 0.5;
+      const cy = ((v * scale) % 1) - 0.5;
+      return Math.sqrt(cx * cx + cy * cy) < 0.26 ? 1 : 0;
+    }
+    case 'halftone': {
+      const cx = ((u * scale) % 1) - 0.5;
+      const cy = ((v * scale) % 1) - 0.5;
+      const radius = 0.06 + 0.4 * (1 - v);
+      return Math.sqrt(cx * cx + cy * cy) < radius ? 1 : 0;
+    }
+    case 'hex': {
+      const row = v * scale;
+      const odd = Math.floor(row) % 2 !== 0;
+      const cx = ((u * scale + (odd ? 0.5 : 0)) % 1) - 0.5;
+      const cy = (row % 1) - 0.5;
+      const d = Math.max(Math.abs(cy), Math.abs(cx) * 0.866 + Math.abs(cy) * 0.5);
+      return d > 0.36 ? 1 : 0;
+    }
+    case 'gradient':
+      return THREE.MathUtils.clamp(1 - v, 0, 1);
     case 'camo': {
       const n =
         0.65 * valueNoise(u * scale, v * scale) +
@@ -255,11 +297,12 @@ export function repaintTexture(analysis, { baseColor, pattern }) {
 
       if (tone !== 0) {
         const toneHsl = tone === 2 ? patDarkHsl : patHsl;
+        const mix = tone === 2 ? 1 : Math.min(tone, 1);
         const toneL = THREE.MathUtils.clamp(toneHsl[2] * shade, 0.03, 0.95);
         const [pr, pg, pb] = hslToRgb(toneHsl[0], toneHsl[1], toneL);
-        nr += (pr - nr) * opacity;
-        ng += (pg - ng) * opacity;
-        nb += (pb - nb) * opacity;
+        nr += (pr - nr) * opacity * mix;
+        ng += (pg - ng) * opacity * mix;
+        nb += (pb - nb) * opacity * mix;
       }
 
       out[i] = nr;
