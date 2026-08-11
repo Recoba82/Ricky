@@ -272,9 +272,19 @@ function LetteringDecal({ make, cfg, ...rest }) {
  * Inchiostro del logo in base al colore base della parte: bianco sui fondi
  * scuri, blu notte sui fondi chiari, cosi' resta sempre leggibile.
  */
-function techInk(hex) {
+function luminance(hex) {
   const c = new THREE.Color(hex);
-  const lum = 0.2126 * c.r + 0.7152 * c.g + 0.0722 * c.b;
+  return 0.2126 * c.r + 0.7152 * c.g + 0.0722 * c.b;
+}
+
+function techInk(baseHex, pattern) {
+  let lum = luminance(baseHex);
+  // Con un pattern attivo il marchio finirebbe spesso su una striscia del
+  // colore pattern: la scelta tiene conto di entrambi i colori.
+  if (pattern && pattern.type !== 'none' && pattern.opacity > 0) {
+    const w = Math.min(1, pattern.opacity) * 0.5;
+    lum = lum * (1 - w) + luminance(pattern.color) * w;
+  }
   return lum > 0.25 ? '#0b1220' : '#ffffff';
 }
 
@@ -334,8 +344,8 @@ function useTintedTexture(src, color) {
   return texture;
 }
 
-function TechLogo({ cfg, color, ...rest }) {
-  const texture = useTintedTexture(TECH_LOGO_URL, techInk(color));
+function TechLogo({ cfg, color, pattern, ...rest }) {
+  const texture = useTintedTexture(TECH_LOGO_URL, techInk(color, pattern));
   return <DecalGroup texture={texture} cfg={cfg} {...rest} />;
 }
 
@@ -436,6 +446,7 @@ export default function ShirtModel() {
           key={'tech-' + i}
           cfg={cfg}
           color={(parts[cfg.part] ?? parts.body).color}
+          pattern={patterns[cfg.part]}
           {...decalProps}
         />
       ))}
