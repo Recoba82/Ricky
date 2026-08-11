@@ -16,6 +16,18 @@ import { placementAnchors, computeDecalTransforms } from '../utils/decalGeometry
 
 export const MODEL_URL = `${import.meta.env.BASE_URL}models/psg-jordan-kit.glb`;
 
+/** Logo dello sponsor tecnico: applicato sempre, non caricato dall'utente. */
+export const TECH_LOGO_URL = `${import.meta.env.BASE_URL}logos/tech-logo.png`;
+
+/**
+ * Posizioni fisse del logo tecnico: fronte petto lato destro sulla maglia e in
+ * basso a sinistra sul pantaloncino. Dimensione fissa 0.03.
+ */
+const TECH_LOGO_PLACEMENTS = [
+  { part: 'body', face: 'front', x: 0.45, y: 0.42, rotation: 0, scale: 0.03, mirror: false },
+  { part: 'shorts', face: 'front', x: -0.55, y: -0.4, rotation: 0, scale: 0.03, mirror: false },
+];
+
 /* ---------- Classificazione mesh -> parte del kit ---------- */
 
 const NAME_RULES = [
@@ -46,6 +58,36 @@ function classifyMesh(mesh, meshBox, kitBox) {
 }
 
 /**
+ * Mappe del materiale originale che contengono il branding stampato della
+ * scansione: oltre al colore, anche rugosita', metallicita', occlusione e
+ * rilievo disegnano loghi e scritte, che restano visibili "tono su tono" sul
+ * capo a tinta unita. Vengono azzerate tutte: il colore viene ridipinto da
+ * repaintTexture e la trama del tessuto arriva dalla normal map procedurale.
+ */
+const BAKED_MAP_KEYS = [
+  'roughnessMap',
+  'metalnessMap',
+  'aoMap',
+  'emissiveMap',
+  'lightMap',
+  'bumpMap',
+  'displacementMap',
+  'specularMap',
+  'alphaMap',
+  'clearcoatMap',
+  'sheenColorMap',
+  'normalMap',
+];
+
+function stripBakedGraphics(material) {
+  BAKED_MAP_KEYS.forEach((key) => {
+    if (material[key]) material[key] = null;
+  });
+  if (material.emissive) material.emissive.set('#000000');
+  material.needsUpdate = true;
+}
+
+/**
  * Clona la scena, classifica ogni mesh in una parte del kit, clona i
  * materiali (per non condividere stato tra mesh) e analizza le texture una
  * sola volta. Salva anche la matrice world di ogni mesh relativa alla radice
@@ -63,6 +105,7 @@ function prepareModel(scene) {
     child.castShadow = true;
     child.receiveShadow = true;
     child.material = child.material.clone();
+    stripBakedGraphics(child.material);
     const meshBox = new THREE.Box3().setFromObject(child);
     const part = classifyMesh(child, meshBox, kitBox);
     const map = child.material.map;
@@ -223,6 +266,79 @@ function LetteringDecal({ make, cfg, ...rest }) {
   return <DecalGroup texture={texture} cfg={cfg} {...rest} />;
 }
 
+/* ---------- Logo sponsor tecnico ---------- */
+
+/**
+ * Inchiostro del logo in base al colore base della parte: bianco sui fondi
+ * scuri, blu notte sui fondi chiari, cosi' resta sempre leggibile.
+ */
+function techInk(hex) {
+  const c = new THREE.Color(hex);
+  const lum = 0.2126 * c.r + 0.7152 * c.g + 0.0722 * c.b;
+  return lum > 0.25 ? '#0b1220' : '#ffffff';
+}
+
+/**
+ * Il file del logo ha fondo bianco: i pixel chiari diventano trasparenti e il
+ * resto viene riempito con l'inchiostro scelto, cosi' il marchio prende il
+ * colore della parte su cui e' applicato.
+ */
+function useTintedTexture(src, color) {
+  const [texture, setTexture] = useState(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    const img = new Image();
+    img.crossOrigin = 'anonymous';
+    img.onload = () => {
+      if (cancelled) return;
+      const w = img.naturalWidth || 256;
+      const h = img.naturalHeight || 256;
+      const canvas = document.createElement('canvas');
+      canvas.width = w;
+      canvas.height = h;
+      const ctx = canvas.getContext('2d', { willReadFrequently: true });
+      ctx.drawImage(img, 0, 0, w, h);
+      const data = ctx.getImageData(0, 0, w, h);
+      const px = data.data;
+      for (let i = 0; i < px.length; i += 4) {
+        const lum = (px[i] + px[i + 1] + px[i + 2]) / 3;
+        const alpha = lum > 238 ? 0 : lum > 200 ? ((238 - lum) / 38) * 255 : 255;
+        px[i + 3] = Math.min(px[i + 3], alpha);
+      }
+      ctx.putImageData(data, 0, 0);
+      ctx.globalCompositeOperation = 'source-in';
+      ctx.fillStyle = color;
+      ctx.fillRect(0, 0, w, h);
+      const t = new THREE.CanvasTexture(canvas);
+      t.colorSpace = THREE.SRGBColorSpace;
+      t.anisotropy = 8;
+      setTexture(t);
+    };
+    img.onerror = () => {
+      if (!cancelled) setTexture(null);
+    };
+    img.src = src;
+    return () => {
+      cancelled = true;
+    };
+  }, [src, color]);
+
+  useEffect(
+    () => () => {
+      if (texture) texture.dispose();
+    },
+    [texture]
+  );
+
+  return texture;
+}
+
+function TechLogo({ cfg, color, ...rest }) {
+  const texture = useTintedTexture(TECH_LOGO_URL, techInk(color));
+  return <DecalGroup texture={texture} cfg={cfg} {...rest} />;
+}
+
 /* ---------- Componente principale ---------- */
 
 export default function ShirtModel() {
@@ -315,6 +431,14 @@ export default function ShirtModel() {
       {Object.entries(decals).map(([slot, cfg]) =>
         cfg.src ? <LogoDecal key={slot} cfg={cfg} {...decalProps} /> : null
       )}
+      {TECH_LOGO_PLACEMENTS.map((cfg, i) => (
+        <TechLogo
+          key={'tech-' + i}
+          cfg={cfg}
+          color={(parts[cfg.part] ?? parts.body).color}
+          {...decalProps}
+        />
+      ))}
       <LetteringDecal
         make={createNumberTexture}
         cfg={{ ...lettering, ...playerNumber }}
