@@ -12,6 +12,18 @@ const FACES = {
   right: { dir: [1, 0, 0], ax: [0, 0, 1], ay: [0, 1, 0] },
 };
 
+/**
+ * Profondità della scatola di proiezione: frazione del lato del decal, con un
+ * tetto in frazione dell'altezza del kit. Abbastanza spessa da coprire
+ * cuciture e curvature (spalle, fianchi) senza arrivare a stampare la grafica
+ * sulla superficie opposta del capo.
+ */
+const DEPTH_RATIO = 1;
+const DEPTH_MAX_KIT = 0.08;
+
+/** Raggio della sfera che racchiude il riquadro del decal, in frazione del lato. */
+const FOOTPRINT_RADIUS = 0.75;
+
 /** Semi-estensione della scatola lungo un asse unitario allineato agli assi. */
 function halfExtent(size, axis) {
   return (Math.abs(axis.x) * size.x + Math.abs(axis.y) * size.y + Math.abs(axis.z) * size.z) / 2;
@@ -62,39 +74,43 @@ export function placementAnchors(cfg, partBox, kitCenterX) {
   });
 }
 
+/** Mesh sonda per il raycast, posizionata come la mesh bersaglio. */
+function makeProbe(target) {
+  const probe = new THREE.Mesh(target.mesh.geometry);
+  target.matrixRel.decompose(probe.position, probe.quaternion, probe.scale);
+  probe.updateMatrixWorld(true);
+  return probe;
+}
+
 /**
  * Trova il punto reale della superficie sotto il punto di mira, sparando un
  * raggio da fuori il kit lungo la direzione di proiezione. Serve perché la
  * sola quota del riquadro non basta: i pantaloncini rientrano rispetto al
  * petto e le calze hanno i piedi che sporgono in avanti, quindi un punto
  * ricavato dal riquadro cadrebbe nel vuoto e non verrebbe proiettato nulla.
- * Ritorna null se il raggio non incontra la mesh.
+ *
+ * Se il bersaglio principale non viene colpito (decal spinto su una cucitura
+ * o sul bordo del capo) si ripiega sulle altre mesh del kit, così la grafica
+ * resta visibile invece di sparire.
  */
-function projectOntoSurface(point, dir, decalTarget, reach) {
+function projectOntoSurface(point, dir, primaryTarget, fallbackTargets, reach) {
   const origin = point.clone().addScaledVector(dir, reach);
-
-  const probe = new THREE.Mesh(decalTarget.mesh.geometry);
-  decalTarget.matrixRel.decompose(probe.position, probe.quaternion, probe.scale);
-  probe.updateMatrixWorld(true);
-
   const raycaster = new THREE.Raycaster(origin, dir.clone().negate(), 0, reach * 2);
-  const hits = raycaster.intersectObject(probe, false);
-  return hits.length > 0 ? hits[0].point.clone() : null;
+
+  const order = [primaryTarget, ...fallbackTargets.filter((t) => t !== primaryTarget)];
+  for (const target of order) {
+    const hits = raycaster.intersectObject(makeProbe(target), false);
+    if (hits.length > 0) return hits[0].point.clone();
+  }
+  return null;
 }
 
 /**
- * Converte l'ancora (spazio scena) in posizione/rotazione/scala locali alla
- * mesh bersaglio. Ritorna null se sotto l'ancora non c'è superficie.
+ * Converte il punto di proiezione (spazio scena) in posizione/rotazione/scala
+ * locali alla mesh indicata.
  */
-export function computeDecalTransform(cfg, anchor, decalTarget, kitBox) {
-  const size = kitBox.getSize(new THREE.Vector3());
-  const reach = size.length();
-  const { p, dir } = anchor;
-
-  const hit = projectOntoSurface(p, dir, decalTarget, reach);
-  if (!hit) return null;
-
-  const inv = decalTarget.matrixRel.clone().invert();
+function localTransform(cfg, hit, dir, target, kitSizeY) {
+  const inv = target.matrixRel.clone().invert();
   const posLocal = hit.clone().applyMatrix4(inv);
 
   // Base esplicita del proiettore in spazio mondo, poi portata nello spazio
@@ -118,14 +134,47 @@ export function computeDecalTransform(cfg, anchor, decalTarget, kitBox) {
 
   // Fattore di conversione scena -> spazio locale mesh, per mantenere la
   // scala percepita costante indipendentemente dalla mesh bersaglio.
-  const probe = size.y * 0.01;
+  const probe = kitSizeY * 0.01;
   const p2Local = hit.clone().add(new THREE.Vector3(0, probe, 0)).applyMatrix4(inv);
   const ratio = p2Local.sub(posLocal).length() / probe;
-  const s = cfg.scale * size.y * ratio;
+  const s = cfg.scale * kitSizeY * ratio;
+  const depth = Math.min(s * DEPTH_RATIO, kitSizeY * DEPTH_MAX_KIT * ratio);
 
   return {
     position: [posLocal.x, posLocal.y, posLocal.z],
     rotation: [e.x, e.y, e.z],
-    scale: [s, s, s * 0.3],
+    scale: [s, s, depth],
   };
+}
+
+/**
+ * Una trasformazione per ogni mesh del kit toccata dal riquadro di
+ * proiezione: la grafica prosegue oltre le cuciture (maniche, colletto,
+ * polsini, fascia in vita) invece di essere tagliata al bordo della parte
+ * scelta, e resta sopra colore e pattern di ogni parte.
+ */
+export function computeDecalTransforms(cfg, anchor, primaryTarget, targets, kitBox) {
+  if (!primaryTarget) return [];
+
+  const kitSize = kitBox.getSize(new THREE.Vector3());
+  const reach = kitSize.length();
+  const { p, dir } = anchor;
+
+  const hit = projectOntoSurface(p, dir, primaryTarget, targets, reach);
+  if (!hit) return [];
+
+  const radius = cfg.scale * kitSize.y * FOOTPRINT_RADIUS;
+
+  return targets
+    .filter((t) => t === primaryTarget || t.box.distanceToPoint(hit) <= radius)
+    .map((t) => ({ target: t, ...localTransform(cfg, hit, dir, t, kitSize.y) }));
+}
+
+/**
+ * Converte l'ancora (spazio scena) in posizione/rotazione/scala locali alla
+ * mesh bersaglio. Ritorna null se sotto l'ancora non c'è superficie.
+ */
+export function computeDecalTransform(cfg, anchor, decalTarget, kitBox) {
+  const list = computeDecalTransforms(cfg, anchor, decalTarget, [decalTarget], kitBox);
+  return list.length > 0 ? list[0] : null;
 }
