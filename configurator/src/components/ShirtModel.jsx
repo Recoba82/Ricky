@@ -24,8 +24,8 @@ export const TECH_LOGO_URL = `${import.meta.env.BASE_URL}logos/tech-logo.png`;
  * basso a sinistra sul pantaloncino. Dimensione fissa 0.03.
  */
 const TECH_LOGO_PLACEMENTS = [
-  { part: 'body', face: 'front', x: 0.4, y: 0.42, rotation: 0, scale: 0.03, mirror: false },
-  { part: 'shorts', face: 'front', x: -0.55, y: -0.4, rotation: 0, scale: 0.03, mirror: false },
+  { part: 'body', face: 'front', x: -0.36, y: 0.5, rotation: 0, scale: 0.03, mirror: false },
+  { part: 'shorts', face: 'front', x: 0.94, y: -1, rotation: 0, scale: 0.03, mirror: false },
 ];
 
 /* ---------- Classificazione mesh -> parte del kit ---------- */
