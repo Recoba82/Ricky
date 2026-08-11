@@ -65,9 +65,23 @@ export default function CanvasContainer() {
 
       <ContactShadows position={[0, -1.28, 0]} opacity={0.45} scale={7} blur={2.4} far={2.6} />
 
+      {/*
+        Trascinamento del modello sullo schermo: tenendo premuto il tasto destro
+        del mouse il kit intero si sposta liberamente, sia in orizzontale sia in
+        verticale (pan nel piano dello schermo). Il tasto sinistro continua a
+        ruotare la vista, la rotellina a zoomare.
+      */}
       <OrbitControls
         makeDefault
-        enablePan={false}
+        enablePan
+        screenSpacePanning
+        panSpeed={1}
+        mouseButtons={{
+          LEFT: THREE.MOUSE.ROTATE,
+          MIDDLE: THREE.MOUSE.DOLLY,
+          RIGHT: THREE.MOUSE.PAN,
+        }}
+        touches={{ ONE: THREE.TOUCH.ROTATE, TWO: THREE.TOUCH.DOLLY_PAN }}
         target={[0, 0, 0]}
         minDistance={2.2}
         maxDistance={8}
