@@ -12,7 +12,7 @@ import {
 } from '../utils/patterns';
 import { createNameTexture, createNumberTexture } from '../utils/nameNumber';
 import { ensureFontLoaded } from '../utils/fonts';
-import { placementAnchors, computeDecalTransform } from '../utils/decalGeometry';
+import { placementAnchors, computeDecalTransforms } from '../utils/decalGeometry';
 
 export const MODEL_URL = `${import.meta.env.BASE_URL}models/psg-jordan-kit.glb`;
 
@@ -174,6 +174,11 @@ function DecalGroup({ texture, cfg, decalTargets, partBoxes, kitBox }) {
   const target = decalTargets[cfg.part];
   const partBox = partBoxes[cfg.part];
 
+  // Gusci esterni del kit (uno per parte): il decal viene proiettato su tutti
+  // quelli toccati dal riquadro, cosi' la grafica non si taglia sulle cuciture
+  // e resta sopra colore e pattern di ogni parte.
+  const shells = useMemo(() => Object.values(decalTargets), [decalTargets]);
+
   const anchors = useMemo(
     () =>
       partBox
@@ -182,23 +187,25 @@ function DecalGroup({ texture, cfg, decalTargets, partBoxes, kitBox }) {
     [cfg.part, cfg.face, cfg.x, cfg.y, cfg.mirror, partBox, kitBox]
   );
 
-  return anchors.map((anchor, i) => {
-    if (!target || !texture) return null;
-    const t = computeDecalTransform(cfg, anchor, target, kitBox);
-    if (!t) return null;
-    return createPortal(
-      <Decal key={i} position={t.position} rotation={t.rotation} scale={t.scale} renderOrder={10}>
-        <meshBasicMaterial
-          map={texture}
-          transparent
-          toneMapped={false}
-          depthWrite={false}
-          polygonOffset
-          polygonOffsetFactor={-16}
-        />
-      </Decal>,
-      target.mesh
-    );
+  return anchors.flatMap((anchor, i) => {
+    if (!target || !texture) return [];
+    return computeDecalTransforms(cfg, anchor, target, shells, kitBox).map((t) => (
+      <React.Fragment key={i + '-' + t.target.part}>
+        {createPortal(
+          <Decal position={t.position} rotation={t.rotation} scale={t.scale} renderOrder={10}>
+            <meshBasicMaterial
+              map={texture}
+              transparent
+              toneMapped={false}
+              depthWrite={false}
+              polygonOffset
+              polygonOffsetFactor={-16}
+            />
+          </Decal>,
+          t.target.mesh
+        )}
+      </React.Fragment>
+    ));
   });
 }
 
