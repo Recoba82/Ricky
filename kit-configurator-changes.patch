@@ -1,0 +1,501 @@
+diff --git a/configurator/src/components/ControlPanel.jsx b/configurator/src/components/ControlPanel.jsx
+index 3e00166..4439e8b 100644
+--- a/configurator/src/components/ControlPanel.jsx
++++ b/configurator/src/components/ControlPanel.jsx
+@@ -9,6 +9,7 @@ import {
+   PLACEMENT_PARTS,
+   PLACEMENT_FACES,
+   FINISHES,
++  COLLAR_STYLES,
+ } from '../store';
+ import { NUMBER_FONTS } from '../utils/fonts';
+ 
+@@ -83,6 +84,8 @@ function Select({ value, options, onChange }) {
+ function ColorsTab() {
+   const parts = useKitStore((s) => s.parts);
+   const setPartColor = useKitStore((s) => s.setPartColor);
++  const collarStyle = useKitStore((s) => s.collarStyle);
++  const setCollarStyle = useKitStore((s) => s.setCollarStyle);
+ 
+   return (
+     <div className="flex flex-col gap-4">
+@@ -94,9 +97,21 @@ function ColorsTab() {
+           onChange={(c) => setPartColor(key, c)}
+         />
+       ))}
++
++      <Field label="Stile colletto">
++        <Select value={collarStyle} onChange={setCollarStyle} options={COLLAR_STYLES} />
++      </Field>
++      {collarStyle !== 'girocollo' && (
++        <p className="text-xs leading-relaxed text-slate-500">
++          Fascia procedurale generata sul profilo dello scollo scansionato: uno stile
++          approssimato, non un vero ricalco del capo, dato che la mesh di base ha un solo
++          colletto reale (girocollo).
++        </p>
++      )}
++
+       <p className="text-xs leading-relaxed text-slate-500">
+-        Se il modello caricato non ha mesh separate per una parte (es. maniche o colletto in una
+-        scansione), il relativo colore non ha effetto.
++        Se il modello caricato non ha mesh separate per una parte (es. maniche in una scansione),
++        il relativo colore non ha effetto.
+       </p>
+     </div>
+   );
+diff --git a/configurator/src/components/ShirtModel.jsx b/configurator/src/components/ShirtModel.jsx
+index fee6234..823a0c3 100644
+--- a/configurator/src/components/ShirtModel.jsx
++++ b/configurator/src/components/ShirtModel.jsx
+@@ -13,6 +13,7 @@ import {
+ import { createNameTexture, createNumberTexture } from '../utils/nameNumber';
+ import { ensureFontLoaded } from '../utils/fonts';
+ import { placementAnchors, computeDecalTransforms } from '../utils/decalGeometry';
++import { buildRingBand, buildStraightRibbon, necklinePoint } from '../utils/collarGeometry';
+ 
+ export const MODEL_URL = `${import.meta.env.BASE_URL}models/psg-jordan-kit.glb`;
+ 
+@@ -20,11 +21,11 @@ export const MODEL_URL = `${import.meta.env.BASE_URL}models/psg-jordan-kit.glb`;
+ export const TECH_LOGO_URL = `${import.meta.env.BASE_URL}logos/tech-logo.png`;
+ 
+ /**
+- * Posizioni fisse del logo tecnico: fronte petto lato destro sulla maglia e in
+- * basso a sinistra sul pantaloncino. Dimensione fissa 0.03.
++ * Posizioni fisse del logo tecnico (TeamWear): fronte petto lato destro sulla
++ * maglia e in basso a sinistra sul pantaloncino. Dimensione fissa 0.03.
+  */
+ const TECH_LOGO_PLACEMENTS = [
+-  { part: 'body', face: 'front', x: -0.36, y: 0.5, rotation: 0, scale: 0.03, mirror: false },
++  { part: 'body', face: 'front', x: -0.42, y: 0.58, rotation: 0, scale: 0.03, mirror: false },
+   { part: 'shorts', face: 'front', x: 0.94, y: -1, rotation: 0, scale: 0.03, mirror: false },
+ ];
+ 
+@@ -87,6 +88,73 @@ function stripBakedGraphics(material) {
+   material.needsUpdate = true;
+ }
+ 
++/** Colore dell'interno (fodera) di ogni parte del kit, vista dall'interno dei bordi aperti. */
++const INTERIOR_COLOR = new THREE.Color('#8a8a8a');
++
++/**
++ * Ogni mesh della scansione e' un guscio a faccia singola: normalmente,
++ * guardando dentro colletto, giromanica o gambali, si vede il vuoto perche'
++ * le backface non vengono disegnate. Questa funzione rende ogni parte a
++ * doppia faccia con un "interno" grigio realistico (stessa normal map di
++ * tessuto, ruvidita' piu' alta) e aggiunge, sul bordo esterno del modello
++ * (dove la normale e' quasi perpendicolare alla vista), un'ombra scura e
++ * sfumata che ne marca il profilo — un effetto rim/fresnel via
++ * onBeforeCompile, perche' la mesh non ha una AO map propria (rimossa in
++ * stripBakedGraphics) su cui disegnarla.
++ */
++function applyShellRealism(material) {
++  material.side = THREE.DoubleSide;
++  material.onBeforeCompile = (shader) => {
++    shader.uniforms.uInteriorColor = { value: INTERIOR_COLOR };
++    shader.uniforms.uEdgeStrength = { value: 0.65 };
++    shader.uniforms.uEdgeSoftness = { value: 0.3 };
++
++    shader.vertexShader = shader.vertexShader
++      .replace('#include <common>', '#include <common>\nvarying vec3 vShellViewPos;')
++      .replace(
++        '#include <project_vertex>',
++        '#include <project_vertex>\nvShellViewPos = -mvPosition.xyz;'
++      );
++
++    shader.fragmentShader = shader.fragmentShader
++      .replace(
++        '#include <common>',
++        '#include <common>\nvarying vec3 vShellViewPos;\nuniform vec3 uInteriorColor;\nuniform float uEdgeStrength;\nuniform float uEdgeSoftness;'
++      )
++      .replace(
++        '#include <color_fragment>',
++        `#include <color_fragment>
++        if ( !gl_FrontFacing ) {
++          diffuseColor.rgb = uInteriorColor;
++        }`
++      )
++      .replace(
++        '#include <roughnessmap_fragment>',
++        `#include <roughnessmap_fragment>
++        if ( !gl_FrontFacing ) {
++          roughnessFactor = 0.92;
++        }`
++      )
++      // L'ombra perimetrale usa la normale "geometrica" (pre normal-map),
++      // catturata subito dopo <normal_fragment_begin>: usare la normale gia'
++      // perturbata dal normal map di tessuto darebbe un bordo sporco e
++      // puntinato invece che una sfumatura morbida.
++      .replace(
++        '#include <normal_fragment_begin>',
++        '#include <normal_fragment_begin>\nvec3 shellGeoNormal = normal;'
++      )
++      .replace(
++        '#include <dithering_fragment>',
++        `vec3 shellViewDir = normalize( vShellViewPos );
++        float shellRim = 1.0 - max( dot( shellGeoNormal, shellViewDir ), 0.0 );
++        float shellMask = smoothstep( uEdgeSoftness, 1.0, shellRim );
++        gl_FragColor.rgb *= mix( 1.0, 1.0 - uEdgeStrength, shellMask );
++        #include <dithering_fragment>`
++      );
++  };
++  material.needsUpdate = true;
++}
++
+ /**
+  * Clona la scena, classifica ogni mesh in una parte del kit, clona i
+  * materiali (per non condividere stato tra mesh) e analizza le texture una
+@@ -106,6 +174,7 @@ function prepareModel(scene) {
+     child.receiveShadow = true;
+     child.material = child.material.clone();
+     stripBakedGraphics(child.material);
++    applyShellRealism(child.material);
+     const meshBox = new THREE.Box3().setFromObject(child);
+     const part = classifyMesh(child, meshBox, kitBox);
+     const map = child.material.map;
+@@ -349,6 +418,88 @@ function TechLogo({ cfg, color, pattern, ...rest }) {
+   return <DecalGroup texture={texture} cfg={cfg} {...rest} />;
+ }
+ 
++/* ---------- Colletto: varianti procedurali Polo / V ---------- */
++
++const COLLAR_PLACKET_GAP = 0.012;
++const COLLAR_PLACKET_LEN = 0.13;
++const VNECK_SHOULDER_L = 130;
++const VNECK_SHOULDER_R = 50;
++const VNECK_DEPTH = 0.16;
++
++/**
++ * Costruisce le geometrie procedurali del colletto scelto, seguendo il
++ * profilo reale dello scollo campionato dalla mesh originale (vedi
++ * utils/collarGeometry.js). "Girocollo" non genera nulla: usa la mesh
++ * scansionata cosi' com'e'.
++ */
++function useCollarGeometry(style) {
++  return useMemo(() => {
++    if (style === 'polo') {
++      const band = buildRingBand({ angleFrom: -180, angleTo: 180 });
++      const top = necklinePoint(90, 'inner', 0.004);
++      const bottom = new THREE.Vector3(top.x, top.y - COLLAR_PLACKET_LEN, top.z + 0.02);
++      const left = buildStraightRibbon(
++        top.clone().add(new THREE.Vector3(-COLLAR_PLACKET_GAP, 0.006, 0)),
++        bottom.clone().add(new THREE.Vector3(-COLLAR_PLACKET_GAP, 0, 0))
++      );
++      const right = buildStraightRibbon(
++        top.clone().add(new THREE.Vector3(COLLAR_PLACKET_GAP, 0.006, 0)),
++        bottom.clone().add(new THREE.Vector3(COLLAR_PLACKET_GAP, 0, 0))
++      );
++      const buttonGeo = new THREE.SphereGeometry(0.006, 12, 10);
++      const buttons = [0.42, 0.75].map((t) => top.clone().lerp(bottom, t).add(new THREE.Vector3(0, 0, 0.016)));
++      return { style, band, ribbons: [left, right], buttonGeo, buttons };
++    }
++    if (style === 'v') {
++      const band = buildRingBand({ angleFrom: VNECK_SHOULDER_L, angleTo: VNECK_SHOULDER_R + 360 });
++      const shoulderL = necklinePoint(VNECK_SHOULDER_L, 'inner', 0.004);
++      const shoulderR = necklinePoint(VNECK_SHOULDER_R, 'inner', 0.004);
++      const front = necklinePoint(90, 'inner', 0.004);
++      const apex = new THREE.Vector3(front.x, front.y - VNECK_DEPTH, front.z + 0.03);
++      const legL = buildStraightRibbon(shoulderL, apex, 0.02);
++      const legR = buildStraightRibbon(shoulderR, apex, 0.02);
++      return { style, band, ribbons: [legL, legR] };
++    }
++    return null;
++  }, [style]);
++}
++
++/**
++ * Renderizza la fascia del colletto procedurale (Polo o V) con lo stesso
++ * trattamento materico delle altre parti: colore scelto per il colletto,
++ * normal map di tessuto, ruvidita' coerente con la finitura corrente.
++ */
++function CollarOverlay({ style, color, finish }) {
++  const geo = useCollarGeometry(style);
++
++  const materialProps = useMemo(() => {
++    const base = { color, normalMap: getMeshNormalTexture(), side: THREE.DoubleSide };
++    if (finish === 'shiny') return { ...base, roughness: 0.35, metalness: 0.15 };
++    if (finish === 'mesh') return { ...base, roughness: 0.8, metalness: 0.02 };
++    return { ...base, roughness: 0.85, metalness: 0 };
++  }, [color, finish]);
++
++  if (!geo) return null;
++
++  return (
++    <group>
++      <mesh geometry={geo.band} castShadow receiveShadow>
++        <meshStandardMaterial {...materialProps} />
++      </mesh>
++      {geo.ribbons.map((g, i) => (
++        <mesh key={i} geometry={g} castShadow receiveShadow>
++          <meshStandardMaterial {...materialProps} />
++        </mesh>
++      ))}
++      {geo.buttons?.map((p, i) => (
++        <mesh key={i} geometry={geo.buttonGeo} position={p} castShadow>
++          <meshStandardMaterial color="#20242c" roughness={0.4} metalness={0.35} />
++        </mesh>
++      ))}
++    </group>
++  );
++}
++
+ /* ---------- Componente principale ---------- */
+ 
+ export default function ShirtModel() {
+@@ -362,6 +513,7 @@ export default function ShirtModel() {
+   const parts = useKitStore((s) => s.parts);
+   const patterns = useKitStore((s) => s.patterns);
+   const finish = useKitStore((s) => s.finish);
++  const collarStyle = useKitStore((s) => s.collarStyle);
+   const decals = useKitStore((s) => s.decals);
+   const lettering = useKitStore((s) => s.lettering);
+   const playerName = useKitStore((s) => s.playerName);
+@@ -424,6 +576,15 @@ export default function ShirtModel() {
+     });
+   }, [finish, targets]);
+ 
++  // Stile colletto: la mesh scansionata (girocollo) resta l'unica visibile
++  // di default; per Polo e V viene nascosta e sostituita dalla fascia
++  // procedurale renderizzata da CollarOverlay.
++  useEffect(() => {
++    targets.forEach(({ mesh, part }) => {
++      if (part === 'collar') mesh.visible = collarStyle === 'girocollo';
++    });
++  }, [collarStyle, targets]);
++
+   // Cleanup completo alla dismissione del modello.
+   useEffect(
+     () => () => {
+@@ -460,6 +621,9 @@ export default function ShirtModel() {
+         cfg={{ ...lettering, ...playerName }}
+         {...decalProps}
+       />
++      {collarStyle !== 'girocollo' && (
++        <CollarOverlay style={collarStyle} color={parts.collar.color} finish={finish} />
++      )}
+     </group>
+   );
+ }
+diff --git a/configurator/src/store.js b/configurator/src/store.js
+index 0f0fe09..d2934b6 100644
+--- a/configurator/src/store.js
++++ b/configurator/src/store.js
+@@ -60,6 +60,19 @@ export const FINISHES = [
+   { value: 'mesh', label: 'Mesh / Traforato', hint: 'Normal map a pori per tessuto sportivo' },
+ ];
+ 
++/**
++ * Stile del colletto. "Girocollo" e' la mesh scansionata originale (nessuna
++ * modifica). "Polo" e "V" sostituiscono quella mesh con una fascia
++ * procedurale generata sul profilo reale dello scollo (vedi
++ * utils/collarGeometry.js), perche' il modello e' una scansione statica e non
++ * ha varianti di colletto proprie.
++ */
++export const COLLAR_STYLES = [
++  { value: 'girocollo', label: 'Girocollo' },
++  { value: 'polo', label: 'Polo' },
++  { value: 'v', label: 'Collo a V' },
++];
++
+ /**
+  * Slot di loghi caricabili dall'utente. Lo sponsor tecnico non e' piu' qui:
+  * il suo logo viene applicato sempre dal modello (TECH_LOGO_PLACEMENTS in
+@@ -70,10 +83,12 @@ export const DECAL_SLOTS = [
+   { key: 'team', label: 'Logo squadra' },
+ ];
+ 
++// Scala di default a 24 (il massimo dello slider "Scala / ripetizione"):
++// pattern piu' fitti fin dall'apertura del configuratore, su ogni parte.
+ const defaultPattern = (type = 'none') => ({
+   type,
+   color: '#ffffff',
+-  scale: 8,
++  scale: 24,
+   opacity: 1,
+ });
+ 
+@@ -110,6 +125,7 @@ export const useKitStore = create((set) => ({
+     socks: defaultPattern(),
+   },
+   finish: 'matte',
++  collarStyle: 'girocollo',
+   decals: {
+     main: defaultDecal({ scale: 0.2, y: 0.05 }),
+     team: defaultDecal({ scale: 0.12, x: -0.4, y: 0.45 }),
+@@ -141,6 +157,8 @@ export const useKitStore = create((set) => ({
+ 
+   setFinish: (finish) => set({ finish }),
+ 
++  setCollarStyle: (collarStyle) => set({ collarStyle }),
++
+   setDecal: (slot, patch) =>
+     set((s) => ({ decals: { ...s.decals, [slot]: { ...s.decals[slot], ...patch } } })),
+ 
+diff --git a/configurator/src/utils/collarGeometry.js b/configurator/src/utils/collarGeometry.js
+new file mode 100644
+index 0000000..e0b41d7
+--- /dev/null
++++ b/configurator/src/utils/collarGeometry.js
+@@ -0,0 +1,163 @@
++import * as THREE from 'three';
++
++/**
++ * Profilo reale dello scollo, campionato dalla mesh del colletto scansionato
++ * (Object_2 del GLB) ogni 10°: raggio interno/esterno e relativa quota Y,
++ * intorno al centro CENTER, nello stesso spazio locale in cui vive `root` in
++ * ShirtModel (prima della normalizzazione scala/posizione del gruppo
++ * esterno). Serve per generare le varianti "Polo" e "Collo a V": il modello
++ * e' una scansione statica con un solo colletto, quindi le altre forme sono
++ * fasce procedurali che seguono il bordo reale dello scollo invece di un
++ * cerchio approssimato.
++ *
++ * Colonne: [angoloDeg, raggioInterno, quotaInterna, raggioEsterno, quotaEsterna]
++ * angolo 0 = +X (fianco), 90 = +Z (fronte), -90 = -Z (retro), ±180 = -X (fianco).
++ */
++const CENTER = { x: -0.00067, z: -0.05746 };
++
++const TABLE = [
++  [-180, 0.06672, 1.67744, 0.08704, 1.65613],
++  [-170, 0.06514, 1.68299, 0.08728, 1.65876],
++  [-160, 0.0624, 1.68692, 0.08656, 1.66451],
++  [-150, 0.0595, 1.68986, 0.08331, 1.66762],
++  [-140, 0.05813, 1.69073, 0.07774, 1.66853],
++  [-130, 0.05502, 1.69181, 0.07354, 1.66826],
++  [-120, 0.05207, 1.69208, 0.06765, 1.66767],
++  [-110, 0.05095, 1.69217, 0.0648, 1.66752],
++  [-100, 0.05021, 1.69216, 0.06327, 1.66754],
++  [-90, 0.05, 1.69214, 0.06337, 1.66756],
++  [-80, 0.05111, 1.69217, 0.06496, 1.6676],
++  [-70, 0.05225, 1.69219, 0.06784, 1.66784],
++  [-60, 0.05538, 1.69208, 0.07171, 1.66829],
++  [-50, 0.05846, 1.69001, 0.07802, 1.66876],
++  [-40, 0.06005, 1.69026, 0.08362, 1.66775],
++  [-30, 0.06299, 1.68748, 0.08674, 1.66463],
++  [-20, 0.06577, 1.68361, 0.08739, 1.66131],
++  [-10, 0.0673, 1.67824, 0.0869, 1.65614],
++  [0, 0.06775, 1.66778, 0.08591, 1.64656],
++  [10, 0.06788, 1.6559, 0.08447, 1.63629],
++  [20, 0.06569, 1.6448, 0.08213, 1.62602],
++  [30, 0.06398, 1.63264, 0.0786, 1.617],
++  [40, 0.06268, 1.62715, 0.0752, 1.60979],
++  [50, 0.06115, 1.61473, 0.07114, 1.60321],
++  [60, 0.05935, 1.61572, 0.068, 1.59971],
++  [70, 0.05713, 1.61468, 0.06464, 1.59714],
++  [80, 0.05638, 1.61245, 0.06326, 1.59623],
++  [90, 0.05634, 1.61245, 0.06314, 1.59625],
++  [100, 0.05698, 1.61411, 0.06542, 1.5979],
++  [110, 0.05899, 1.61794, 0.06771, 1.59979],
++  [120, 0.06053, 1.61658, 0.07181, 1.60457],
++  [130, 0.06269, 1.62254, 0.07478, 1.6096],
++  [140, 0.06365, 1.63793, 0.07813, 1.61704],
++  [150, 0.06514, 1.64445, 0.08154, 1.62592],
++  [160, 0.0673, 1.65898, 0.08396, 1.63587],
++  [170, 0.06712, 1.66268, 0.08582, 1.64635],
++];
++
++const STEP = 360 / TABLE.length;
++
++function wrapAngle(deg) {
++  return (((deg + 180) % 360) + 360) % 360 - 180;
++}
++
++function sampleAt(angleDeg) {
++  const a = wrapAngle(angleDeg);
++  const n = TABLE.length;
++  let idx = Math.floor((a + 180) / STEP);
++  idx = ((idx % n) + n) % n;
++  const idxNext = (idx + 1) % n;
++  const row0 = TABLE[idx];
++  const row1 = TABLE[idxNext];
++  let t = (a - row0[0]) / STEP;
++  if (t < 0) t += 1;
++  const lerp = (u, v) => u + (v - u) * t;
++  return {
++    innerR: lerp(row0[1], row1[1]),
++    innerY: lerp(row0[2], row1[2]),
++    outerR: lerp(row0[3], row1[3]),
++    outerY: lerp(row0[4], row1[4]),
++  };
++}
++
++/** Punto 3D sul bordo dello scollo (interno o esterno) con offset radiale opzionale. */
++export function necklinePoint(angleDeg, kind = 'inner', radiusOffset = 0) {
++  const s = sampleAt(angleDeg);
++  const r = (kind === 'inner' ? s.innerR : s.outerR) + radiusOffset;
++  const y = kind === 'inner' ? s.innerY : s.outerY;
++  const rad = (angleDeg * Math.PI) / 180;
++  return new THREE.Vector3(CENTER.x + r * Math.cos(rad), y, CENTER.z + r * Math.sin(rad));
++}
++
++/**
++ * Fascia (ring band) che segue il profilo reale dello scollo tra due angoli
++ * (in gradi, puo' superare ±180 per attraversare il retro in un unico giro).
++ * `riseY` solleva la fascia di poco per evitare z-fighting con la maglia
++ * sottostante.
++ */
++export function buildRingBand({
++  angleFrom,
++  angleTo,
++  segments = 72,
++  innerOffset = 0.004,
++  outerOffset = 0.02,
++  riseY = 0.006,
++}) {
++  const positions = [];
++  const indices = [];
++  const span = angleTo - angleFrom;
++
++  for (let i = 0; i <= segments; i++) {
++    const ang = angleFrom + (span * i) / segments;
++    const pIn = necklinePoint(ang, 'inner', innerOffset);
++    const pOut = necklinePoint(ang, 'outer', outerOffset);
++    positions.push(pIn.x, pIn.y + riseY, pIn.z, pOut.x, pOut.y + riseY, pOut.z);
++  }
++  for (let i = 0; i < segments; i++) {
++    const a = i * 2;
++    const b = i * 2 + 1;
++    const c = i * 2 + 2;
++    const d = i * 2 + 3;
++    indices.push(a, b, c, b, d, c);
++  }
++
++  const geo = new THREE.BufferGeometry();
++  geo.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
++  geo.setIndex(indices);
++  geo.computeVertexNormals();
++  geo.computeBoundingSphere();
++  return geo;
++}
++
++/**
++ * Nastro piatto tra due punti 3D (placket della polo, bordi del collo a V):
++ * un quad suddiviso, spostato lungo `offset` per staccarsi dalla superficie
++ * sottostante ed evitare z-fighting.
++ */
++export function buildStraightRibbon(pA, pB, width = 0.018, offset = new THREE.Vector3(0, 0, 0.014), segments = 8) {
++  const positions = [];
++  const indices = [];
++  const dir = pB.clone().sub(pA);
++  let side = new THREE.Vector3().crossVectors(dir, new THREE.Vector3(0, 1, 0));
++  if (side.lengthSq() < 1e-8) side.set(1, 0, 0);
++  side.normalize().multiplyScalar(width / 2);
++
++  for (let i = 0; i <= segments; i++) {
++    const t = i / segments;
++    const c = pA.clone().lerp(pB, t).add(offset);
++    positions.push(c.x - side.x, c.y - side.y, c.z - side.z, c.x + side.x, c.y + side.y, c.z + side.z);
++  }
++  for (let i = 0; i < segments; i++) {
++    const a = i * 2;
++    const b = i * 2 + 1;
++    const c = i * 2 + 2;
++    const d = i * 2 + 3;
++    indices.push(a, b, c, b, d, c);
++  }
++
++  const geo = new THREE.BufferGeometry();
++  geo.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
++  geo.setIndex(indices);
++  geo.computeVertexNormals();
++  geo.computeBoundingSphere();
++  return geo;
++}
