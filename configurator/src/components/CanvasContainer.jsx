@@ -1,4 +1,4 @@
-import React, { Suspense, useEffect } from 'react';
+import React, { Suspense, useEffect, useRef } from 'react';
 import { Canvas, useThree } from '@react-three/fiber';
 import { OrbitControls, ContactShadows, Html } from '@react-three/drei';
 import * as THREE from 'three';
@@ -26,6 +26,31 @@ function StudioEnvironment() {
   return null;
 }
 
+/**
+ * Inquadratura adattiva: calcola la distanza della camera in base al rapporto
+ * di forma del canvas, cosi il kit resta interamente visibile anche su
+ * schermi molto stretti (mobile a 318px) o su canvas bassi.
+ */
+function ResponsiveCamera() {
+  const { camera, size } = useThree();
+  const applied = useRef(0);
+
+  useEffect(() => {
+    const aspect = size.width / Math.max(size.height, 1);
+    const halfV = Math.tan((camera.fov * Math.PI) / 360);
+    const distV = 1.45 / halfV;
+    const distH = 0.85 / (halfV * Math.max(aspect, 0.2));
+    const dist = Math.min(Math.max(distV, distH), 7.6);
+    if (Math.abs(applied.current - dist) < 0.02) return;
+    applied.current = dist;
+    const factor = dist / 4.6;
+    camera.position.set(0, 0.4 * factor, 4.6 * factor);
+    camera.updateProjectionMatrix();
+  }, [camera, size.width, size.height]);
+
+  return null;
+}
+
 function Loader() {
   return (
     <Html center>
@@ -40,12 +65,14 @@ function Loader() {
 export default function CanvasContainer() {
   return (
     <Canvas
-      shadows
+      shadows="soft"
       dpr={[1, 2]}
       camera={{ position: [0, 0.4, 4.6], fov: 35 }}
       gl={{ antialias: true, preserveDrawingBuffer: true }}
     >
       <color attach="background" args={['#eef0f4']} />
+
+      <ResponsiveCamera />
 
       <hemisphereLight args={['#ffffff', '#b7bdc9', 0.5]} />
       <ambientLight intensity={0.35} />
@@ -63,7 +90,16 @@ export default function CanvasContainer() {
         <ShirtModel />
       </Suspense>
 
-      <ContactShadows position={[0, -1.28, 0]} opacity={0.45} scale={7} blur={2.4} far={2.6} />
+      {/* Ombra di contatto morbida e leggera sotto il kit */}
+      <ContactShadows
+        position={[0, -1.29, 0]}
+        opacity={0.32}
+        scale={8}
+        blur={3.2}
+        far={3}
+        resolution={1024}
+        color="#1e293b"
+      />
 
       {/*
         Trascinamento del modello sullo schermo: tenendo premuto il tasto destro
