@@ -11,12 +11,12 @@ import { DEFAULT_FONT_ID } from './utils/fonts';
 export const PART_KEYS = ['body', 'sleeves', 'collar', 'cuffs', 'shorts', 'socks'];
 
 export const PART_LABELS = {
-  body: 'Corpo maglia',
-  sleeves: 'Maniche',
-  collar: 'Colletto',
-  cuffs: 'Polsini',
-  shorts: 'Pantaloncini',
-  socks: 'Calzettoni',
+    body: 'Corpo maglia',
+    sleeves: 'Maniche',
+    collar: 'Colletto',
+    cuffs: 'Polsini',
+    shorts: 'Pantaloncini',
+    socks: 'Calzettoni',
 };
 
 /** Parti su cui ha senso applicare un pattern (superfici estese). */
@@ -37,14 +37,14 @@ export const PATTERN_TYPES = [
   { value: 'hex', label: 'Esagoni' },
   { value: 'gradient', label: 'Sfumatura' },
   { value: 'camo', label: 'Camouflage' },
-];
+  ];
 
 /** Capo su cui applicare un elemento: determina la mesh bersaglio. */
 export const PLACEMENT_PARTS = [
   { value: 'body', label: 'Maglia' },
   { value: 'shorts', label: 'Pantaloncini' },
   { value: 'socks', label: 'Calzettoni' },
-];
+  ];
 
 /** Lato del capo verso cui proietta il decal. */
 export const PLACEMENT_FACES = [
@@ -52,13 +52,26 @@ export const PLACEMENT_FACES = [
   { value: 'back', label: 'Dietro' },
   { value: 'left', label: 'Lato sinistro' },
   { value: 'right', label: 'Lato destro' },
-];
+  ];
 
 export const FINISHES = [
   { value: 'matte', label: 'Opaco', hint: 'Tessuto cotone, roughness alta' },
   { value: 'shiny', label: 'Lucido / Satinato', hint: 'Poliestere tecnico, riflessi morbidi' },
   { value: 'mesh', label: 'Mesh / Traforato', hint: 'Normal map a pori per tessuto sportivo' },
-];
+  ];
+
+/**
+ * Stile del colletto. "Girocollo" e' la mesh scansionata originale (nessuna
+ * modifica). "Polo" e "V" sostituiscono quella mesh con una fascia
+ * procedurale generata sul profilo reale dello scollo (vedi
+ * utils/collarGeometry.js), perche' il modello e' una scansione statica e non
+ * ha varianti di colletto proprie.
+ */
+export const COLLAR_STYLES = [
+  { value: 'girocollo', label: 'Girocollo' },
+  { value: 'polo', label: 'Polo' },
+  { value: 'v', label: 'Collo a V' },
+  ];
 
 /**
  * Slot di loghi caricabili dall'utente. Lo sponsor tecnico non e' piu' qui:
@@ -68,13 +81,15 @@ export const FINISHES = [
 export const DECAL_SLOTS = [
   { key: 'main', label: 'Sponsor principale' },
   { key: 'team', label: 'Logo squadra' },
-];
+  ];
 
+// Scala di default a 24 (il massimo dello slider "Scala / ripetizione"):
+// pattern piu' fitti fin dall'apertura del configuratore, su ogni parte.
 const defaultPattern = (type = 'none') => ({
-  type,
-  color: '#ffffff',
-  scale: 8,
-  opacity: 1,
+    type,
+    color: '#ffffff',
+    scale: 24,
+    opacity: 1,
 });
 
 /**
@@ -83,73 +98,76 @@ const defaultPattern = (type = 'none') => ({
  * replica l'elemento su entrambi i gambali dei calzettoni.
  */
 const placement = (over = {}) => ({
-  part: 'body',
-  face: 'front',
-  x: 0,
-  y: 0,
-  rotation: 0,
-  scale: 0.2,
-  mirror: false,
-  ...over,
+    part: 'body',
+    face: 'front',
+    x: 0,
+    y: 0,
+    rotation: 0,
+    scale: 0.2,
+    mirror: false,
+    ...over,
 });
 
 const defaultDecal = (over) => ({ src: null, ...placement(over) });
 
 export const useKitStore = create((set) => ({
-  parts: {
-    body: { color: '#0d1b3d' },
-    sleeves: { color: '#0d1b3d' },
-    collar: { color: '#ffffff' },
-    cuffs: { color: '#ffffff' },
-    shorts: { color: '#ffffff' },
-    socks: { color: '#0d1b3d' },
-  },
-  patterns: {
-    body: defaultPattern('stripes'),
-    shorts: defaultPattern(),
-    socks: defaultPattern(),
-  },
-  finish: 'matte',
-  decals: {
-    main: defaultDecal({ scale: 0.2, y: 0.05 }),
-    team: defaultDecal({ scale: 0.12, x: -0.4, y: 0.45 }),
-  },
-  // Font, colore e contorno sono condivisi da nome e numero: nel catalogo
-  // "Select your number" lo stile si sceglie una volta per tutto il kit.
-  lettering: {
-    fontId: DEFAULT_FONT_ID,
-    color: '#ffffff',
-    outlineColor: '#c8102e',
-    outlineWidth: 0,
-  },
-  // Default tarati sul retro maglia: nome alto sulle spalle, numero al
-  // centro, senza sovrapporsi. Da qui l'utente sposta tutto liberamente.
-  playerName: {
-    text: '',
-    ...placement({ face: 'back', y: 0.76, scale: 0.17 }),
-  },
-  playerNumber: {
-    text: '',
-    ...placement({ face: 'back', y: 0, scale: 0.23 }),
-  },
+    parts: {
+          body: { color: '#0d1b3d' },
+          sleeves: { color: '#0d1b3d' },
+          collar: { color: '#ffffff' },
+          cuffs: { color: '#ffffff' },
+          shorts: { color: '#ffffff' },
+          socks: { color: '#0d1b3d' },
+    },
+    patterns: {
+          body: defaultPattern('stripes'),
+          shorts: defaultPattern(),
+          socks: defaultPattern(),
+    },
+    finish: 'matte',
+    collarStyle: 'girocollo',
+    decals: {
+          main: defaultDecal({ scale: 0.2, y: 0.05 }),
+          team: defaultDecal({ scale: 0.12, x: -0.4, y: 0.45 }),
+    },
+    // Font, colore e contorno sono condivisi da nome e numero: nel catalogo
+    // "Select your number" lo stile si sceglie una volta per tutto il kit.
+    lettering: {
+          fontId: DEFAULT_FONT_ID,
+          color: '#ffffff',
+          outlineColor: '#c8102e',
+          outlineWidth: 0,
+    },
+    // Default tarati sul retro maglia: nome alto sulle spalle, numero al
+    // centro, senza sovrapporsi. Da qui l'utente sposta tutto liberamente.
+    playerName: {
+          text: '',
+          ...placement({ face: 'back', y: 0.76, scale: 0.17 }),
+    },
+    playerNumber: {
+          text: '',
+          ...placement({ face: 'back', y: 0, scale: 0.23 }),
+    },
 
-  setPartColor: (part, color) =>
-    set((s) => ({ parts: { ...s.parts, [part]: { ...s.parts[part], color } } })),
+    setPartColor: (part, color) =>
+          set((s) => ({ parts: { ...s.parts, [part]: { ...s.parts[part], color } } })),
 
-  setPattern: (part, patch) =>
-    set((s) => ({ patterns: { ...s.patterns, [part]: { ...s.patterns[part], ...patch } } })),
+    setPattern: (part, patch) =>
+          set((s) => ({ patterns: { ...s.patterns, [part]: { ...s.patterns[part], ...patch } } })),
 
-  setFinish: (finish) => set({ finish }),
+    setFinish: (finish) => set({ finish }),
 
-  setDecal: (slot, patch) =>
-    set((s) => ({ decals: { ...s.decals, [slot]: { ...s.decals[slot], ...patch } } })),
+    setCollarStyle: (collarStyle) => set({ collarStyle }),
 
-  clearDecal: (slot) =>
-    set((s) => ({ decals: { ...s.decals, [slot]: { ...s.decals[slot], src: null } } })),
+    setDecal: (slot, patch) =>
+          set((s) => ({ decals: { ...s.decals, [slot]: { ...s.decals[slot], ...patch } } })),
 
-  setLettering: (patch) => set((s) => ({ lettering: { ...s.lettering, ...patch } })),
+    clearDecal: (slot) =>
+          set((s) => ({ decals: { ...s.decals, [slot]: { ...s.decals[slot], src: null } } })),
 
-  setPlayerName: (patch) => set((s) => ({ playerName: { ...s.playerName, ...patch } })),
+    setLettering: (patch) => set((s) => ({ lettering: { ...s.lettering, ...patch } })),
 
-  setPlayerNumber: (patch) => set((s) => ({ playerNumber: { ...s.playerNumber, ...patch } })),
+    setPlayerName: (patch) => set((s) => ({ playerName: { ...s.playerName, ...patch } })),
+
+    setPlayerNumber: (patch) => set((s) => ({ playerNumber: { ...s.playerNumber, ...patch } })),
 }));
