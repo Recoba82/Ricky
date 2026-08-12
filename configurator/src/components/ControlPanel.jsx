@@ -289,7 +289,7 @@ function FontPicker() {
   return (
     <div className="flex flex-col gap-2">
       <span className="text-sm text-slate-300">Font numero e nome</span>
-      <div className="grid max-h-56 grid-cols-2 gap-2 overflow-y-auto pr-1">
+      <div className="grid max-h-44 grid-cols-2 gap-2 overflow-y-auto pr-1 md:max-h-56">
         {NUMBER_FONTS.map((f) => (
           <button
             key={f.id}
@@ -435,9 +435,9 @@ export default function ControlPanel() {
   const [tab, setTab] = useState('colors');
 
   return (
-    <aside className="flex w-[380px] shrink-0 flex-col border-l border-slate-800 bg-slate-900">
-      <header className="border-b border-slate-800 p-5">
-        <h1 className="text-lg font-semibold text-slate-100">Configuratore 3D Kit</h1>
+    <aside className="flex max-h-[58dvh] w-full shrink-0 flex-col border-t border-slate-800 bg-slate-900 md:h-full md:max-h-none md:w-[320px] md:border-t-0 md:border-l lg:w-[380px]">
+      <header className="border-b border-slate-800 p-4 md:p-5">
+        <h1 className="text-base font-semibold text-slate-100 md:text-lg">Configuratore 3D Kit</h1>
         <p className="mt-1 text-xs text-slate-500">
           Personalizza colori, pattern, loghi e materiali in tempo reale.
         </p>
@@ -448,7 +448,7 @@ export default function ControlPanel() {
           <button
             key={t.id}
             onClick={() => setTab(t.id)}
-            className={`flex-1 rounded-lg px-2 py-2 text-xs font-medium transition-colors ${
+            className={`flex-1 rounded-lg px-1.5 py-2 text-[11px] font-medium transition-colors md:px-2 md:text-xs ${
               tab === t.id
                 ? 'bg-indigo-600 text-white'
                 : 'text-slate-400 hover:bg-slate-800 hover:text-slate-200'
@@ -459,14 +459,14 @@ export default function ControlPanel() {
         ))}
       </nav>
 
-      <div className="flex-1 overflow-y-auto p-5">
+      <div className="flex-1 overflow-y-auto p-4 md:p-5">
         {tab === 'colors' && <ColorsTab />}
         {tab === 'patterns' && <PatternsTab />}
         {tab === 'decals' && <DecalsTab />}
         {tab === 'materials' && <MaterialsTab />}
       </div>
 
-      <footer className="border-t border-slate-800 p-4">
+      <footer className="border-t border-slate-800 p-3 md:p-4">
         <p className="text-[10px] leading-relaxed text-slate-600">
           Mesh 3D basata su{' '}
           <a
