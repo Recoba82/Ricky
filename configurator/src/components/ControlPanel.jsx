@@ -9,6 +9,7 @@ import {
   PLACEMENT_PARTS,
   PLACEMENT_FACES,
   FINISHES,
+  COLLAR_STYLES,
 } from '../store';
 import { NUMBER_FONTS } from '../utils/fonts';
 
@@ -83,6 +84,8 @@ function Select({ value, options, onChange }) {
 function ColorsTab() {
   const parts = useKitStore((s) => s.parts);
   const setPartColor = useKitStore((s) => s.setPartColor);
+  const collarStyle = useKitStore((s) => s.collarStyle);
+  const setCollarStyle = useKitStore((s) => s.setCollarStyle);
 
   return (
     <div className="flex flex-col gap-4">
@@ -94,9 +97,21 @@ function ColorsTab() {
           onChange={(c) => setPartColor(key, c)}
         />
       ))}
+
+      <Field label="Stile colletto">
+        <Select value={collarStyle} onChange={setCollarStyle} options={COLLAR_STYLES} />
+      </Field>
+      {collarStyle !== 'girocollo' && (
+        <p className="text-xs leading-relaxed text-slate-500">
+          Fascia procedurale generata sul profilo dello scollo scansionato: uno stile
+          approssimato, non un vero ricalco del capo, dato che la mesh di base ha un solo
+          colletto reale (girocollo).
+        </p>
+      )}
+
       <p className="text-xs leading-relaxed text-slate-500">
-        Se il modello caricato non ha mesh separate per una parte (es. maniche o colletto in una
-        scansione), il relativo colore non ha effetto.
+        Se il modello caricato non ha mesh separate per una parte (es. maniche in una scansione),
+        il relativo colore non ha effetto.
       </p>
     </div>
   );
