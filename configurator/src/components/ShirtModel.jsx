@@ -13,6 +13,7 @@ import {
 import { createNameTexture, createNumberTexture } from '../utils/nameNumber';
 import { ensureFontLoaded } from '../utils/fonts';
 import { placementAnchors, computeDecalTransforms } from '../utils/decalGeometry';
+import { buildRingBand, buildStraightRibbon, necklinePoint } from '../utils/collarGeometry';
 
 export const MODEL_URL = `${import.meta.env.BASE_URL}models/psg-jordan-kit.glb`;
 
@@ -20,11 +21,11 @@ export const MODEL_URL = `${import.meta.env.BASE_URL}models/psg-jordan-kit.glb`;
 export const TECH_LOGO_URL = `${import.meta.env.BASE_URL}logos/tech-logo.png`;
 
 /**
- * Posizioni fisse del logo tecnico: fronte petto lato destro sulla maglia e in
- * basso a sinistra sul pantaloncino. Dimensione fissa 0.03.
+ * Posizioni fisse del logo tecnico (TeamWear): fronte petto lato destro sulla
+ * maglia e in basso a sinistra sul pantaloncino. Dimensione fissa 0.03.
  */
 const TECH_LOGO_PLACEMENTS = [
-  { part: 'body', face: 'front', x: -0.36, y: 0.5, rotation: 0, scale: 0.03, mirror: false },
+  { part: 'body', face: 'front', x: -0.42, y: 0.58, rotation: 0, scale: 0.03, mirror: false },
   { part: 'shorts', face: 'front', x: 0.94, y: -1, rotation: 0, scale: 0.03, mirror: false },
 ];
 
@@ -87,6 +88,73 @@ function stripBakedGraphics(material) {
   material.needsUpdate = true;
 }
 
+/** Colore dell'interno (fodera) di ogni parte del kit, vista dall'interno dei bordi aperti. */
+const INTERIOR_COLOR = new THREE.Color('#8a8a8a');
+
+/**
+ * Ogni mesh della scansione e' un guscio a faccia singola: normalmente,
+ * guardando dentro colletto, giromanica o gambali, si vede il vuoto perche'
+ * le backface non vengono disegnate. Questa funzione rende ogni parte a
+ * doppia faccia con un "interno" grigio realistico (stessa normal map di
+ * tessuto, ruvidita' piu' alta) e aggiunge, sul bordo esterno del modello
+ * (dove la normale e' quasi perpendicolare alla vista), un'ombra scura e
+ * sfumata che ne marca il profilo — un effetto rim/fresnel via
+ * onBeforeCompile, perche' la mesh non ha una AO map propria (rimossa in
+ * stripBakedGraphics) su cui disegnarla.
+ */
+function applyShellRealism(material) {
+  material.side = THREE.DoubleSide;
+  material.onBeforeCompile = (shader) => {
+    shader.uniforms.uInteriorColor = { value: INTERIOR_COLOR };
+    shader.uniforms.uEdgeStrength = { value: 0.65 };
+    shader.uniforms.uEdgeSoftness = { value: 0.3 };
+
+    shader.vertexShader = shader.vertexShader
+      .replace('#include <common>', '#include <common>\nvarying vec3 vShellViewPos;')
+      .replace(
+        '#include <project_vertex>',
+        '#include <project_vertex>\nvShellViewPos = -mvPosition.xyz;'
+      );
+
+    shader.fragmentShader = shader.fragmentShader
+      .replace(
+        '#include <common>',
+        '#include <common>\nvarying vec3 vShellViewPos;\nuniform vec3 uInteriorColor;\nuniform float uEdgeStrength;\nuniform float uEdgeSoftness;'
+      )
+      .replace(
+        '#include <color_fragment>',
+        `#include <color_fragment>
+        if ( !gl_FrontFacing ) {
+          diffuseColor.rgb = uInteriorColor;
+        }`
+      )
+      .replace(
+        '#include <roughnessmap_fragment>',
+        `#include <roughnessmap_fragment>
+        if ( !gl_FrontFacing ) {
+          roughnessFactor = 0.92;
+        }`
+      )
+      // L'ombra perimetrale usa la normale "geometrica" (pre normal-map),
+      // catturata subito dopo <normal_fragment_begin>: usare la normale gia'
+      // perturbata dal normal map di tessuto darebbe un bordo sporco e
+      // puntinato invece che una sfumatura morbida.
+      .replace(
+        '#include <normal_fragment_begin>',
+        '#include <normal_fragment_begin>\nvec3 shellGeoNormal = normal;'
+      )
+      .replace(
+        '#include <dithering_fragment>',
+        `vec3 shellViewDir = normalize( vShellViewPos );
+        float shellRim = 1.0 - max( dot( shellGeoNormal, shellViewDir ), 0.0 );
+        float shellMask = smoothstep( uEdgeSoftness, 1.0, shellRim );
+        gl_FragColor.rgb *= mix( 1.0, 1.0 - uEdgeStrength, shellMask );
+        #include <dithering_fragment>`
+      );
+  };
+  material.needsUpdate = true;
+}
+
 /**
  * Clona la scena, classifica ogni mesh in una parte del kit, clona i
  * materiali (per non condividere stato tra mesh) e analizza le texture una
@@ -106,6 +174,7 @@ function prepareModel(scene) {
     child.receiveShadow = true;
     child.material = child.material.clone();
     stripBakedGraphics(child.material);
+    applyShellRealism(child.material);
     const meshBox = new THREE.Box3().setFromObject(child);
     const part = classifyMesh(child, meshBox, kitBox);
     const map = child.material.map;
@@ -349,6 +418,88 @@ function TechLogo({ cfg, color, pattern, ...rest }) {
   return <DecalGroup texture={texture} cfg={cfg} {...rest} />;
 }
 
+/* ---------- Colletto: varianti procedurali Polo / V ---------- */
+
+const COLLAR_PLACKET_GAP = 0.012;
+const COLLAR_PLACKET_LEN = 0.13;
+const VNECK_SHOULDER_L = 130;
+const VNECK_SHOULDER_R = 50;
+const VNECK_DEPTH = 0.16;
+
+/**
+ * Costruisce le geometrie procedurali del colletto scelto, seguendo il
+ * profilo reale dello scollo campionato dalla mesh originale (vedi
+ * utils/collarGeometry.js). "Girocollo" non genera nulla: usa la mesh
+ * scansionata cosi' com'e'.
+ */
+function useCollarGeometry(style) {
+  return useMemo(() => {
+    if (style === 'polo') {
+      const band = buildRingBand({ angleFrom: -180, angleTo: 180 });
+      const top = necklinePoint(90, 'inner', 0.004);
+      const bottom = new THREE.Vector3(top.x, top.y - COLLAR_PLACKET_LEN, top.z + 0.02);
+      const left = buildStraightRibbon(
+        top.clone().add(new THREE.Vector3(-COLLAR_PLACKET_GAP, 0.006, 0)),
+        bottom.clone().add(new THREE.Vector3(-COLLAR_PLACKET_GAP, 0, 0))
+      );
+      const right = buildStraightRibbon(
+        top.clone().add(new THREE.Vector3(COLLAR_PLACKET_GAP, 0.006, 0)),
+        bottom.clone().add(new THREE.Vector3(COLLAR_PLACKET_GAP, 0, 0))
+      );
+      const buttonGeo = new THREE.SphereGeometry(0.006, 12, 10);
+      const buttons = [0.42, 0.75].map((t) => top.clone().lerp(bottom, t).add(new THREE.Vector3(0, 0, 0.016)));
+      return { style, band, ribbons: [left, right], buttonGeo, buttons };
+    }
+    if (style === 'v') {
+      const band = buildRingBand({ angleFrom: VNECK_SHOULDER_L, angleTo: VNECK_SHOULDER_R + 360 });
+      const shoulderL = necklinePoint(VNECK_SHOULDER_L, 'inner', 0.004);
+      const shoulderR = necklinePoint(VNECK_SHOULDER_R, 'inner', 0.004);
+      const front = necklinePoint(90, 'inner', 0.004);
+      const apex = new THREE.Vector3(front.x, front.y - VNECK_DEPTH, front.z + 0.03);
+      const legL = buildStraightRibbon(shoulderL, apex, 0.02);
+      const legR = buildStraightRibbon(shoulderR, apex, 0.02);
+      return { style, band, ribbons: [legL, legR] };
+    }
+    return null;
+  }, [style]);
+}
+
+/**
+ * Renderizza la fascia del colletto procedurale (Polo o V) con lo stesso
+ * trattamento materico delle altre parti: colore scelto per il colletto,
+ * normal map di tessuto, ruvidita' coerente con la finitura corrente.
+ */
+function CollarOverlay({ style, color, finish }) {
+  const geo = useCollarGeometry(style);
+
+  const materialProps = useMemo(() => {
+    const base = { color, normalMap: getMeshNormalTexture(), side: THREE.DoubleSide };
+    if (finish === 'shiny') return { ...base, roughness: 0.35, metalness: 0.15 };
+    if (finish === 'mesh') return { ...base, roughness: 0.8, metalness: 0.02 };
+    return { ...base, roughness: 0.85, metalness: 0 };
+  }, [color, finish]);
+
+  if (!geo) return null;
+
+  return (
+    <group>
+      <mesh geometry={geo.band} castShadow receiveShadow>
+        <meshStandardMaterial {...materialProps} />
+      </mesh>
+      {geo.ribbons.map((g, i) => (
+        <mesh key={i} geometry={g} castShadow receiveShadow>
+          <meshStandardMaterial {...materialProps} />
+        </mesh>
+      ))}
+      {geo.buttons?.map((p, i) => (
+        <mesh key={i} geometry={geo.buttonGeo} position={p} castShadow>
+          <meshStandardMaterial color="#20242c" roughness={0.4} metalness={0.35} />
+        </mesh>
+      ))}
+    </group>
+  );
+}
+
 /* ---------- Componente principale ---------- */
 
 export default function ShirtModel() {
@@ -362,6 +513,7 @@ export default function ShirtModel() {
   const parts = useKitStore((s) => s.parts);
   const patterns = useKitStore((s) => s.patterns);
   const finish = useKitStore((s) => s.finish);
+  const collarStyle = useKitStore((s) => s.collarStyle);
   const decals = useKitStore((s) => s.decals);
   const lettering = useKitStore((s) => s.lettering);
   const playerName = useKitStore((s) => s.playerName);
@@ -424,6 +576,15 @@ export default function ShirtModel() {
     });
   }, [finish, targets]);
 
+  // Stile colletto: la mesh scansionata (girocollo) resta l'unica visibile
+  // di default; per Polo e V viene nascosta e sostituita dalla fascia
+  // procedurale renderizzata da CollarOverlay.
+  useEffect(() => {
+    targets.forEach(({ mesh, part }) => {
+      if (part === 'collar') mesh.visible = collarStyle === 'girocollo';
+    });
+  }, [collarStyle, targets]);
+
   // Cleanup completo alla dismissione del modello.
   useEffect(
     () => () => {
@@ -460,6 +621,9 @@ export default function ShirtModel() {
         cfg={{ ...lettering, ...playerName }}
         {...decalProps}
       />
+      {collarStyle !== 'girocollo' && (
+        <CollarOverlay style={collarStyle} color={parts.collar.color} finish={finish} />
+      )}
     </group>
   );
 }
