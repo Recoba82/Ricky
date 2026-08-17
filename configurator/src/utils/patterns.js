@@ -406,3 +406,51 @@ export function getMeshNormalTexture() {
   meshNormalCache = texture;
   return texture;
 }
+
+let ribNormalCache = null;
+
+/**
+ * Normal map "a costine" (rib-knit) per il colletto Polo: creste verticali
+ * regolari, generate come un'onda quasi triangolare lungo l'asse U del
+ * tile e costanti lungo la V. E' diversa dalla trama a pori del tessuto
+ * piatto (getMeshNormalTexture) e replica invece il rilievo del maglione a
+ * coste tipico del collo/falde polo. Chi la usa clona la texture per
+ * impostare un `repeat` proprio (piu' fitto sulla fascia, piu' rado sulle
+ * falde) mantenendo lo stesso pattern di base.
+ */
+export function getRibNormalTexture() {
+  if (ribNormalCache) return ribNormalCache;
+
+  const size = 128;
+  const canvas = document.createElement('canvas');
+  canvas.width = size;
+  canvas.height = size;
+  const ctx = canvas.getContext('2d');
+  const img = ctx.createImageData(size, size);
+
+  const ridgesPerTile = 6;
+  for (let y = 0; y < size; y++) {
+    for (let x = 0; x < size; x++) {
+      const u = (x / size) * ridgesPerTile * Math.PI * 2;
+      const slope = Math.sin(u);
+      // Esponente <1 sul modulo appiattisce il fondo e accentua il bordo
+      // della costa, dando un profilo piu' vicino a una maglia reale che a
+      // una semplice sinusoide.
+      const shaped = Math.sign(slope) * Math.pow(Math.abs(slope), 0.6);
+      const nrm = new THREE.Vector3(shaped * 0.9, 0, 1).normalize();
+      const i = (y * size + x) * 4;
+      img.data[i] = (nrm.x * 0.5 + 0.5) * 255;
+      img.data[i + 1] = (nrm.y * 0.5 + 0.5) * 255;
+      img.data[i + 2] = (nrm.z * 0.5 + 0.5) * 255;
+      img.data[i + 3] = 255;
+    }
+  }
+  ctx.putImageData(img, 0, 0);
+
+  const texture = new THREE.CanvasTexture(canvas);
+  texture.wrapS = THREE.RepeatWrapping;
+  texture.wrapT = THREE.RepeatWrapping;
+  texture.repeat.set(1, 1);
+  ribNormalCache = texture;
+  return texture;
+}
