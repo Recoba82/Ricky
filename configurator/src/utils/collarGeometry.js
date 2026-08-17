@@ -103,6 +103,7 @@ export function buildRingBand({
   riseY = 0.006,
 }) {
   const positions = [];
+  const uvs = [];
   const indices = [];
   const span = angleTo - angleFrom;
 
@@ -111,6 +112,12 @@ export function buildRingBand({
     const pIn = necklinePoint(ang, 'inner', innerOffset);
     const pOut = necklinePoint(ang, 'outer', outerOffset);
     positions.push(pIn.x, pIn.y + riseY, pIn.z, pOut.x, pOut.y + riseY, pOut.z);
+    // u = posizione lungo la circonferenza, v = 0 interno / 1 esterno: con la
+    // normal map a coste (variazione lungo la sua U, costante lungo la V) le
+    // creste corrono verticali (interno->esterno), ripetute intorno al collo
+    // via texture.repeat sulla U, cosi' come un vero colletto a costine.
+    const u = i / segments;
+    uvs.push(u, 0, u, 1);
   }
   for (let i = 0; i < segments; i++) {
     const a = i * 2;
@@ -122,6 +129,7 @@ export function buildRingBand({
 
   const geo = new THREE.BufferGeometry();
   geo.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
+  geo.setAttribute('uv', new THREE.Float32BufferAttribute(uvs, 2));
   geo.setIndex(indices);
   geo.computeVertexNormals();
   geo.computeBoundingSphere();
@@ -135,6 +143,7 @@ export function buildRingBand({
  */
 export function buildStraightRibbon(pA, pB, width = 0.018, offset = new THREE.Vector3(0, 0, 0.014), segments = 8) {
   const positions = [];
+  const uvs = [];
   const indices = [];
   const dir = pB.clone().sub(pA);
   let side = new THREE.Vector3().crossVectors(dir, new THREE.Vector3(0, 1, 0));
@@ -145,6 +154,7 @@ export function buildStraightRibbon(pA, pB, width = 0.018, offset = new THREE.Ve
     const t = i / segments;
     const c = pA.clone().lerp(pB, t).add(offset);
     positions.push(c.x - side.x, c.y - side.y, c.z - side.z, c.x + side.x, c.y + side.y, c.z + side.z);
+    uvs.push(0, t, 1, t);
   }
   for (let i = 0; i < segments; i++) {
     const a = i * 2;
@@ -156,6 +166,58 @@ export function buildStraightRibbon(pA, pB, width = 0.018, offset = new THREE.Ve
 
   const geo = new THREE.BufferGeometry();
   geo.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
+  geo.setAttribute('uv', new THREE.Float32BufferAttribute(uvs, 2));
+  geo.setIndex(indices);
+  geo.computeVertexNormals();
+  geo.computeBoundingSphere();
+  return geo;
+}
+
+/**
+ * Falda piatta del colletto Polo: dal bordo della fascia (collar stand)
+ * all'altezza spalla si allarga verso il petto e si assottiglia fino alla
+ * punta vicino al primo bottone, replicando la sagoma ripiegata di un vero
+ * colletto polo (a differenza della fascia, che e' solo lo stacco verticale
+ * intorno al collo). Quad a ventaglio di 4 punti: attacco interno, attacco
+ * esterno (sulla fascia), "pancia" della falda spinta verso il petto, punta.
+ */
+export function buildCollarLapel({
+  shoulderAngle,
+  apex,
+  bandInnerOffset = 0.004,
+  bandOuterOffset = 0.012,
+  bulgeOffset = 0.05,
+  bulgeAngleShift = 22,
+  dropY = 0.035,
+  forwardZ = 0.013,
+  riseY = 0.007,
+}) {
+  const lift = new THREE.Vector3(0, riseY, 0);
+  const towardFront = Math.sign(90 - shoulderAngle) || 1;
+  const bulgeAngle = shoulderAngle + towardFront * bulgeAngleShift;
+
+  const pIn = necklinePoint(shoulderAngle, 'inner', bandInnerOffset).add(lift);
+  const pOut = necklinePoint(shoulderAngle, 'outer', bandOuterOffset).add(lift);
+  const pBulge = necklinePoint(bulgeAngle, 'outer', bulgeOffset)
+    .add(new THREE.Vector3(0, -dropY * 0.4, forwardZ * 0.6))
+    .add(lift);
+  const pTip = apex.clone().add(new THREE.Vector3(0, -dropY, forwardZ)).add(lift);
+
+  const positions = [
+    pIn.x, pIn.y, pIn.z,
+    pOut.x, pOut.y, pOut.z,
+    pBulge.x, pBulge.y, pBulge.z,
+    pTip.x, pTip.y, pTip.z,
+  ];
+  // u = attacco (0 = lato collo, 1 = bordo esterno/pancia) per far correre le
+  // coste della normal map dal collo verso la punta; v = percorso interno
+  // (0 in alto in fascia) -> punta (1), cosi' la trama non si strizza.
+  const uvs = [0, 0, 1, 0, 1, 0.62, 0.5, 1];
+  const indices = [0, 1, 2, 0, 2, 3];
+
+  const geo = new THREE.BufferGeometry();
+  geo.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
+  geo.setAttribute('uv', new THREE.Float32BufferAttribute(uvs, 2));
   geo.setIndex(indices);
   geo.computeVertexNormals();
   geo.computeBoundingSphere();
