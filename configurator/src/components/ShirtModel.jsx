@@ -9,11 +9,17 @@ import {
   extractSampler,
   applySampler,
   getMeshNormalTexture,
+  getRibNormalTexture,
 } from '../utils/patterns';
 import { createNameTexture, createNumberTexture } from '../utils/nameNumber';
 import { ensureFontLoaded } from '../utils/fonts';
 import { placementAnchors, computeDecalTransforms } from '../utils/decalGeometry';
-import { buildRingBand, buildStraightRibbon, necklinePoint } from '../utils/collarGeometry';
+import {
+  buildRingBand,
+  buildStraightRibbon,
+  buildCollarLapel,
+  necklinePoint,
+} from '../utils/collarGeometry';
 
 export const MODEL_URL = `${import.meta.env.BASE_URL}models/psg-jordan-kit.glb`;
 
@@ -421,10 +427,22 @@ function TechLogo({ cfg, color, pattern, ...rest }) {
 /* ---------- Colletto: varianti procedurali Polo / V ---------- */
 
 const COLLAR_PLACKET_GAP = 0.012;
-const COLLAR_PLACKET_LEN = 0.13;
-const VNECK_SHOULDER_L = 130;
-const VNECK_SHOULDER_R = 50;
+const COLLAR_PLACKET_LEN = 0.2;
+// Il petto si allontana dal collo scendendo verso il basso: uno scarto in
+// avanti fisso farebbe affondare il placket/i bottoni piu' bassi dentro la
+// maglia. Questo offset cresce con la distanza dal colletto per restare
+// sempre davanti alla superficie del corpo.
+const COLLAR_PLACKET_BULGE = 0.05;
+// Angoli spalla condivisi da Polo e V: aprono la fascia sul davanti (il
+// resto del giro, dalla spalla sinistra alla destra passando per il retro,
+// resta chiuso). Per la Polo l'apertura viene richiusa dalle due falde
+// piatte (vedi buildCollarLapel); per il V resta aperta a "V".
+const SHOULDER_L = 130;
+const SHOULDER_R = 50;
 const VNECK_DEPTH = 0.16;
+// Fascia (collar stand) della Polo: stretta e aderente al collo, non un
+// bordo largo, cosi' non "svolazza" come un colletto a scialle.
+const POLO_BAND_OUTER_OFFSET = 0.012;
 
 /**
  * Costruisce le geometrie procedurali del colletto scelto, seguendo il
@@ -435,25 +453,72 @@ const VNECK_DEPTH = 0.16;
 function useCollarGeometry(style) {
   return useMemo(() => {
     if (style === 'polo') {
-      const band = buildRingBand({ angleFrom: -180, angleTo: 180 });
+      // La fascia segue solo spalla-retro-spalla (come il V): il davanti,
+      // dove prima si chiudeva ad anello intero creando un colletto a
+      // scialle sovradimensionato, e' ora coperto dalle due falde piatte
+      // che si incontrano sopra il primo bottone, come un vero collo polo.
+      const band = buildRingBand({
+        angleFrom: SHOULDER_L,
+        angleTo: SHOULDER_R + 360,
+        outerOffset: POLO_BAND_OUTER_OFFSET,
+        riseY: 0.005,
+      });
       const top = necklinePoint(90, 'inner', 0.004);
-      const bottom = new THREE.Vector3(top.x, top.y - COLLAR_PLACKET_LEN, top.z + 0.02);
+      const bottom = new THREE.Vector3(
+        top.x,
+        top.y - COLLAR_PLACKET_LEN,
+        top.z + COLLAR_PLACKET_BULGE
+      );
+      // Punto lungo il placket a parametro `t`, con uno scarto extra in
+      // avanti (oltre al bulge del nastro) cosi' bottoni e cuciture restano
+      // sempre leggibili sopra il tessuto invece di affondarci dentro.
+      const placketPoint = (t, extraZ) =>
+        top.clone().lerp(bottom, t).add(new THREE.Vector3(0, 0, extraZ));
+      // Le due bande del placket si fermano subito sotto l'ultimo bottone
+      // (non fino in fondo a `bottom`, che serve solo come riferimento per
+      // spaziare i bottoni): oltre restava un lembo isolato senza bottoni.
+      const ribbonEnd = top.clone().lerp(bottom, 0.78);
+
       const left = buildStraightRibbon(
         top.clone().add(new THREE.Vector3(-COLLAR_PLACKET_GAP, 0.006, 0)),
-        bottom.clone().add(new THREE.Vector3(-COLLAR_PLACKET_GAP, 0, 0))
+        ribbonEnd.clone().add(new THREE.Vector3(-COLLAR_PLACKET_GAP, 0, 0))
       );
       const right = buildStraightRibbon(
         top.clone().add(new THREE.Vector3(COLLAR_PLACKET_GAP, 0.006, 0)),
-        bottom.clone().add(new THREE.Vector3(COLLAR_PLACKET_GAP, 0, 0))
+        ribbonEnd.clone().add(new THREE.Vector3(COLLAR_PLACKET_GAP, 0, 0))
       );
-      const buttonGeo = new THREE.SphereGeometry(0.006, 12, 10);
-      const buttons = [0.42, 0.75].map((t) => top.clone().lerp(bottom, t).add(new THREE.Vector3(0, 0, 0.016)));
-      return { style, band, ribbons: [left, right], buttonGeo, buttons };
+      const lapelLeft = buildCollarLapel({
+        shoulderAngle: SHOULDER_L,
+        apex: top,
+        bandOuterOffset: POLO_BAND_OUTER_OFFSET,
+      });
+      const lapelRight = buildCollarLapel({
+        shoulderAngle: SHOULDER_R,
+        apex: top,
+        bandOuterOffset: POLO_BAND_OUTER_OFFSET,
+      });
+      // Bottone: disco piatto (non piu' una sfera) con un sottile bordo a
+      // toro per leggere il profilo, orientato verso l'esterno (+Z).
+      const buttonGeo = new THREE.CylinderGeometry(0.0075, 0.0075, 0.003, 20).rotateX(Math.PI / 2);
+      const buttonRimGeo = new THREE.TorusGeometry(0.0078, 0.0011, 8, 20);
+      // Due bottoni ben distanziati lungo il placket (il primo appena sotto
+      // le falde, il secondo piu' in basso sul petto), entrambi spinti
+      // abbastanza in avanti da restare sempre visibili sopra il tessuto.
+      const buttons = [0.28, 0.68].map((t) => placketPoint(t, 0.02 + t * 0.025));
+      return {
+        style,
+        band,
+        ribbons: [left, right],
+        lapels: [lapelLeft, lapelRight],
+        buttonGeo,
+        buttonRimGeo,
+        buttons,
+      };
     }
     if (style === 'v') {
-      const band = buildRingBand({ angleFrom: VNECK_SHOULDER_L, angleTo: VNECK_SHOULDER_R + 360 });
-      const shoulderL = necklinePoint(VNECK_SHOULDER_L, 'inner', 0.004);
-      const shoulderR = necklinePoint(VNECK_SHOULDER_R, 'inner', 0.004);
+      const band = buildRingBand({ angleFrom: SHOULDER_L, angleTo: SHOULDER_R + 360 });
+      const shoulderL = necklinePoint(SHOULDER_L, 'inner', 0.004);
+      const shoulderR = necklinePoint(SHOULDER_R, 'inner', 0.004);
       const front = necklinePoint(90, 'inner', 0.004);
       const apex = new THREE.Vector3(front.x, front.y - VNECK_DEPTH, front.z + 0.03);
       const legL = buildStraightRibbon(shoulderL, apex, 0.02);
@@ -466,35 +531,71 @@ function useCollarGeometry(style) {
 
 /**
  * Renderizza la fascia del colletto procedurale (Polo o V) con lo stesso
- * trattamento materico delle altre parti: colore scelto per il colletto,
- * normal map di tessuto, ruvidita' coerente con la finitura corrente.
+ * trattamento materico delle altre parti: colore scelto per il colletto
+ * (sempre il fattore colore base del materiale, mai attenuato da una
+ * texture sotto, cosi' resta il primo elemento leggibile a colpo d'occhio),
+ * ruvidita' coerente con la finitura corrente e, sulla Polo, una normal map
+ * a costine dedicata al posto della trama generica del tessuto.
  */
 function CollarOverlay({ style, color, finish }) {
   const geo = useCollarGeometry(style);
 
   const materialProps = useMemo(() => {
-    const base = { color, normalMap: getMeshNormalTexture(), side: THREE.DoubleSide };
+    const base = { color, side: THREE.DoubleSide };
     if (finish === 'shiny') return { ...base, roughness: 0.35, metalness: 0.15 };
     if (finish === 'mesh') return { ...base, roughness: 0.8, metalness: 0.02 };
     return { ...base, roughness: 0.85, metalness: 0 };
   }, [color, finish]);
 
+  // Due varianti della stessa normal map a costine: piu' fitta sulla fascia
+  // stretta intorno al collo, piu' rada sulle falde piatte, cosi' le coste
+  // sembrano proseguire in scala naturale invece di strizzarsi o sparire.
+  const ribBandNormal = useMemo(() => {
+    const t = getRibNormalTexture().clone();
+    t.repeat.set(26, 1);
+    t.needsUpdate = true;
+    return t;
+  }, []);
+  const ribLapelNormal = useMemo(() => {
+    const t = getRibNormalTexture().clone();
+    t.repeat.set(5, 1);
+    t.needsUpdate = true;
+    return t;
+  }, []);
+  const fabricNormal = useMemo(() => getMeshNormalTexture(), []);
+
   if (!geo) return null;
+
+  const isPolo = style === 'polo';
 
   return (
     <group>
       <mesh geometry={geo.band} castShadow receiveShadow>
-        <meshStandardMaterial {...materialProps} />
+        <meshStandardMaterial
+          {...materialProps}
+          normalMap={isPolo ? ribBandNormal : fabricNormal}
+          normalScale={isPolo ? [0.8, 0.8] : [0.35, 0.35]}
+        />
       </mesh>
+      {geo.lapels?.map((g, i) => (
+        <mesh key={'lapel-' + i} geometry={g} castShadow receiveShadow>
+          <meshStandardMaterial {...materialProps} normalMap={ribLapelNormal} normalScale={[0.6, 0.6]} />
+        </mesh>
+      ))}
       {geo.ribbons.map((g, i) => (
         <mesh key={i} geometry={g} castShadow receiveShadow>
-          <meshStandardMaterial {...materialProps} />
+          <meshStandardMaterial {...materialProps} normalMap={fabricNormal} normalScale={[0.35, 0.35]} />
         </mesh>
       ))}
       {geo.buttons?.map((p, i) => (
-        <mesh key={i} geometry={geo.buttonGeo} position={p} castShadow>
-          <meshStandardMaterial color="#20242c" roughness={0.4} metalness={0.35} />
-        </mesh>
+        <group key={i} position={p}>
+          <mesh geometry={geo.buttonGeo} castShadow>
+            <meshStandardMaterial color="#1b1e24" roughness={0.35} metalness={0.45} />
+          </mesh>
+          <mesh geometry={geo.buttonRimGeo} castShadow>
+            <meshStandardMaterial color="#0b0d11" roughness={0.5} metalness={0.3} />
+          </mesh>
+        </group>
       ))}
     </group>
   );
