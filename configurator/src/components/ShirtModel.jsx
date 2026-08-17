@@ -18,7 +18,9 @@ import {
   buildRingBand,
   buildStraightRibbon,
   buildCollarLapel,
+  buildFrontYoke,
   necklinePoint,
+  COLLAR_SURFACE_LIFT,
 } from '../utils/collarGeometry';
 
 export const MODEL_URL = `${import.meta.env.BASE_URL}models/psg-jordan-kit.glb`;
@@ -457,11 +459,14 @@ function useCollarGeometry(style) {
       // dove prima si chiudeva ad anello intero creando un colletto a
       // scialle sovradimensionato, e' ora coperto dalle due falde piatte
       // che si incontrano sopra il primo bottone, come un vero collo polo.
+      // Nessun riseY esplicito: usa lo stesso sollevamento condiviso
+      // (COLLAR_SURFACE_LIFT) delle falde, cosi' i due bordi che si toccano
+      // (fascia <-> falda alla spalla) restano esattamente alla stessa
+      // quota, senza gradino visibile.
       const band = buildRingBand({
         angleFrom: SHOULDER_L,
         angleTo: SHOULDER_R + 360,
         outerOffset: POLO_BAND_OUTER_OFFSET,
-        riseY: 0.005,
       });
       const top = necklinePoint(90, 'inner', 0.004);
       const bottom = new THREE.Vector3(
@@ -505,6 +510,11 @@ function useCollarGeometry(style) {
       // le falde, il secondo piu' in basso sul petto), entrambi spinti
       // abbastanza in avanti da restare sempre visibili sopra il tessuto.
       const buttons = [0.28, 0.68].map((t) => placketPoint(t, 0.02 + t * 0.025));
+      // Toppa in colore maglia che chiude il vero foro scansionato sotto le
+      // falde (vedi buildFrontYoke): senza, il vuoto della scansione
+      // originale resterebbe visibile a certe inquadrature, letto come uno
+      // stacco tra colletto e maglia.
+      const yoke = buildFrontYoke({ angleFrom: SHOULDER_R, angleTo: SHOULDER_L });
       return {
         style,
         band,
@@ -513,6 +523,7 @@ function useCollarGeometry(style) {
         buttonGeo,
         buttonRimGeo,
         buttons,
+        yoke,
       };
     }
     if (style === 'v') {
@@ -521,9 +532,17 @@ function useCollarGeometry(style) {
       const shoulderR = necklinePoint(SHOULDER_R, 'inner', 0.004);
       const front = necklinePoint(90, 'inner', 0.004);
       const apex = new THREE.Vector3(front.x, front.y - VNECK_DEPTH, front.z + 0.03);
-      const legL = buildStraightRibbon(shoulderL, apex, 0.02);
-      const legR = buildStraightRibbon(shoulderR, apex, 0.02);
-      return { style, band, ribbons: [legL, legR] };
+      // Il nastro parte esattamente a filo del bordo interno della fascia
+      // (stesso identico sollevamento COLLAR_SURFACE_LIFT, niente scarto in
+      // avanti: zero gradino nel punto di attacco alla spalla) e si stacca
+      // gradualmente dal petto solo avvicinandosi alla punta, come il
+      // risvolto naturale di un vero collo a V.
+      const flushAtBand = new THREE.Vector3(0, COLLAR_SURFACE_LIFT, 0);
+      const peeledAtTip = new THREE.Vector3(0, COLLAR_SURFACE_LIFT, 0.026);
+      const legL = buildStraightRibbon(shoulderL, apex, 0.022, flushAtBand, peeledAtTip);
+      const legR = buildStraightRibbon(shoulderR, apex, 0.022, flushAtBand, peeledAtTip);
+      const yoke = buildFrontYoke({ angleFrom: SHOULDER_R, angleTo: SHOULDER_L });
+      return { style, band, ribbons: [legL, legR], yoke };
     }
     return null;
   }, [style]);
@@ -537,15 +556,43 @@ function useCollarGeometry(style) {
  * ruvidita' coerente con la finitura corrente e, sulla Polo, una normal map
  * a costine dedicata al posto della trama generica del tessuto.
  */
-function CollarOverlay({ style, color, finish }) {
+function CollarOverlay({ style, color, bodyColor, finish }) {
   const geo = useCollarGeometry(style);
 
   const materialProps = useMemo(() => {
-    const base = { color, side: THREE.DoubleSide };
+    // Il sollevamento geometrico verso la maglia sottostante e' ormai
+    // minimo (COLLAR_SURFACE_LIFT), per restare aderente senza stacco:
+    // il polygonOffset compensa evitando z-fighting/flicker senza doverlo
+    // simulare con un distacco fisico maggiore.
+    const base = {
+      color,
+      side: THREE.DoubleSide,
+      polygonOffset: true,
+      polygonOffsetFactor: -4,
+      polygonOffsetUnits: -4,
+    };
     if (finish === 'shiny') return { ...base, roughness: 0.35, metalness: 0.15 };
     if (finish === 'mesh') return { ...base, roughness: 0.8, metalness: 0.02 };
     return { ...base, roughness: 0.85, metalness: 0 };
   }, [color, finish]);
+
+  // Toppa di chiusura del vero foro scansionato: stesso trattamento
+  // materico della maglia (colore corpo, non colletto: e' quel che si
+  // vedrebbe comunque sotto un vero colletto aperto) ma con un
+  // polygonOffset piu' lieve, cosi' resta sempre "sotto" a band/falde/nastro
+  // nello z-buffer invece di poterci competere sopra.
+  const yokeMaterialProps = useMemo(() => {
+    const base = {
+      color: bodyColor,
+      side: THREE.DoubleSide,
+      polygonOffset: true,
+      polygonOffsetFactor: -2,
+      polygonOffsetUnits: -2,
+    };
+    if (finish === 'shiny') return { ...base, roughness: 0.35, metalness: 0.15 };
+    if (finish === 'mesh') return { ...base, roughness: 0.8, metalness: 0.02 };
+    return { ...base, roughness: 0.85, metalness: 0 };
+  }, [bodyColor, finish]);
 
   // Due varianti della stessa normal map a costine: piu' fitta sulla fascia
   // stretta intorno al collo, piu' rada sulle falde piatte, cosi' le coste
@@ -570,6 +617,11 @@ function CollarOverlay({ style, color, finish }) {
 
   return (
     <group>
+      {geo.yoke && (
+        <mesh geometry={geo.yoke} castShadow receiveShadow>
+          <meshStandardMaterial {...yokeMaterialProps} normalMap={fabricNormal} normalScale={[0.35, 0.35]} />
+        </mesh>
+      )}
       <mesh geometry={geo.band} castShadow receiveShadow>
         <meshStandardMaterial
           {...materialProps}
@@ -723,7 +775,12 @@ export default function ShirtModel() {
         {...decalProps}
       />
       {collarStyle !== 'girocollo' && (
-        <CollarOverlay style={collarStyle} color={parts.collar.color} finish={finish} />
+        <CollarOverlay
+          style={collarStyle}
+          color={parts.collar.color}
+          bodyColor={parts.body.color}
+          finish={finish}
+        />
       )}
     </group>
   );
